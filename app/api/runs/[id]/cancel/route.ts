@@ -1,0 +1,1 @@
+import {services} from "@/lib/server/services";export async function POST(_:Request,{params}:{params:Promise<{id:string}>}){const {id}=await params;services.agentRunner.cancel(id);return Response.json({ok:true,data:services.sessionRepository.findRun(id)})}

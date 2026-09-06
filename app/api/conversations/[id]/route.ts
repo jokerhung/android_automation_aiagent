@@ -1,0 +1,1 @@
+import {services} from "@/lib/server/services";export const dynamic="force-dynamic";export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){const {id}=await params;const c=services.sessionRepository.get(id);return c?Response.json({ok:true,data:c}):Response.json({ok:false,error:{code:"NOT_FOUND",message:"Conversation not found"}},{status:404})}

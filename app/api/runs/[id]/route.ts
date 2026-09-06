@@ -1,0 +1,1 @@
+import {services} from "@/lib/server/services";export const dynamic="force-dynamic";export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){const {id}=await params;const r=services.sessionRepository.findRun(id);return r?Response.json({ok:true,data:r}):Response.json({ok:false,error:{code:"NOT_FOUND",message:"Run not found"}},{status:404})}
