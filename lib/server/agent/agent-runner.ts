@@ -92,6 +92,7 @@ class AgentRunner {
         await this.checkpoint(run,state);
         const device=await deviceManager.requireConnected(run.deviceSerial);
         await this.checkpoint(run,state);
+        sessionRepository.addRunEvent(run.id,"run.step.started",{step,maxSteps:run.maxSteps});
         eventBus.emit("run.step.started",{step,maxSteps:run.maxSteps},{conversationId:run.conversationId,runId:run.id});
         const capture=await adbService.run(["exec-out","screencap","-p"],{serial:run.deviceSerial,signal:state.controller.signal,timeoutMs:15000});
         await this.checkpoint(run,state);
@@ -108,6 +109,8 @@ class AgentRunner {
           eventBus.emit("run.completed",{result:action.thought},{conversationId:run.conversationId,runId:run.id});
           return;
         }
+        sessionRepository.addRunEvent(run.id,"run.step.planned",{step,action:action.action,summary:action.thought});
+        eventBus.emit("run.step.planned",{step,action:action.action,summary:action.thought},{conversationId:run.conversationId,runId:run.id});
         const started=Date.now();
         await deviceControlService.execute(run.deviceSerial,action,state.controller.signal,"agent");
         await this.checkpoint(run,state);

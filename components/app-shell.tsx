@@ -6,7 +6,7 @@ import { containedMediaViewport, pointerToNormalized } from "@/lib/shared/coordi
 import {AndroidStreamPlayer,type ClientStreamSession} from "@/components/android-stream-player";
 
 type Api<T> = { ok: boolean; data: T; error?: { message: string } };
-type Settings={model?:string;baseUrl?:string;maxSteps?:number;deviceRefreshMs?:number;screenRefreshMs?:number;apiKeyConfigured?:boolean};
+type Settings={model?:string;baseUrl?:string;maxSteps?:number;screenRefreshMs?:number;apiKeyConfigured?:boolean};
 
 async function get<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: "no-store" });
@@ -21,22 +21,24 @@ export default function AppShell() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [goal, setGoal] = useState("");
-  const [maxSteps, setMaxSteps] = useState(15);
+  const [maxSteps, setMaxSteps] = useState(50);
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [devicesRefreshing,setDevicesRefreshing]=useState(false);
   const [screenRefreshMs,setScreenRefreshMs]=useState(900);
-  const [deviceRefreshMs,setDeviceRefreshMs]=useState(3000);
   const [showSettings,setShowSettings]=useState(false);
   const [settings,setSettings]=useState<Settings>({});
   const [streamSession,setStreamSession]=useState<ClientStreamSession|null>(null);
   const [streamGeneration,setStreamGeneration]=useState(0);
   const [controlPending,setControlPending]=useState<"pause"|"resume"|"cancel"|null>(null);
+  const [liveStep,setLiveStep]=useState<{step:number;maxSteps:number;phase:string}|null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
   const conversationInitialized=useRef(false);
   const run = useMemo(() => conversation?.runs.at(-1) || null, [conversation]);
   const active = Boolean(run && ["queued", "running", "pausing", "paused", "cancelling"].includes(run.status));
 
   const loadDevices = useCallback(async () => {
+    setDevicesRefreshing(true);
     try {
       const list = await get<DeviceSummary[]>("/api/devices");
       setDevices(list);
@@ -47,6 +49,8 @@ export default function AppShell() {
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setDevicesRefreshing(false);
     }
   }, []);
 
@@ -56,23 +60,24 @@ export default function AppShell() {
     return list;
   }, []);
 
-  useEffect(()=>{void get<Settings>("/api/settings").then(value=>{setSettings(value);if(value.maxSteps)setMaxSteps(value.maxSteps);if(value.screenRefreshMs)setScreenRefreshMs(value.screenRefreshMs);if(value.deviceRefreshMs)setDeviceRefreshMs(value.deviceRefreshMs)}).catch(cause=>setError(cause instanceof Error?cause.message:String(cause)))},[]);
+  useEffect(()=>{void get<Settings>("/api/settings").then(value=>{setSettings(value);if(value.maxSteps)setMaxSteps(value.maxSteps);if(value.screenRefreshMs)setScreenRefreshMs(value.screenRefreshMs)}).catch(cause=>setError(cause instanceof Error?cause.message:String(cause)))},[]);
 
   useEffect(() => {
     void loadDevices();
     void loadConversations().then(async list=>{if(!conversationInitialized.current&&list[0]){conversationInitialized.current=true;setConversation(await get<Conversation>("/api/conversations/"+list[0].id))}}).catch(cause=>setError(cause instanceof Error?cause.message:String(cause)));
-    const timer = setInterval(() => void loadDevices(),deviceRefreshMs);
-    return () => clearInterval(timer);
-  }, [loadDevices, loadConversations,deviceRefreshMs]);
+  }, [loadDevices, loadConversations]);
 
   useEffect(() => {
     if(!conversation)return;
     const currentRun=conversation.runs.at(-1);
     const reload=()=>{void get<Conversation>("/api/conversations/"+conversation.id).then(setConversation);void loadConversations();setRefresh(value=>value+1)};
-    if(!currentRun||!["queued","running","pausing","paused","cancelling"].includes(currentRun.status)){return}
+    if(!currentRun||!["queued","running","pausing","paused","cancelling"].includes(currentRun.status)){setLiveStep(null);return}
     const source=new EventSource("/api/runs/"+currentRun.id+"/events");
-    source.onopen=reload;source.onmessage=reload;
-    for(const type of ["run.status","run.step","run.step.started","run.step.action","run.completed","run.failed","run.cancelled"])source.addEventListener(type,reload);
+    source.addEventListener("run.step.started",event=>{const data=JSON.parse((event as MessageEvent).data) as {step:number;maxSteps:number};setLiveStep({...data,phase:"Đang quan sát và phân tích màn hình…"})});
+    source.addEventListener("run.step.planned",event=>{const data=JSON.parse((event as MessageEvent).data) as {step:number;action:string;summary:string};setLiveStep(current=>({step:data.step,maxSteps:current?.maxSteps||currentRun.maxSteps,phase:data.summary||"Đang thực hiện "+data.action+"…"}))});
+    source.addEventListener("run.step.action",()=>{setLiveStep(null);reload()});
+    source.addEventListener("run.step",reload);
+    for(const type of ["run.status","run.completed","run.failed","run.cancelled"])source.addEventListener(type,()=>{setLiveStep(null);reload()});
     source.onerror=()=>{if(source.readyState===EventSource.CLOSED)setTimeout(reload,1000)};
     return()=>source.close();
   }, [conversation?.id,run?.id,run?.status,loadConversations]);
@@ -94,8 +99,8 @@ export default function AppShell() {
 
   async function deleteConversation(){if(!conversation||!window.confirm("Xóa cuộc trò chuyện này?"))return;const response=await fetch("/api/conversations/"+conversation.id,{method:"DELETE"});const payload=await response.json() as Api<{id:string}>;if(!payload.ok){setError(payload.error?.message||"Không thể xóa");return}setConversation(null);await loadConversations()}
 
-  async function openSettings(){const value=await get<Settings>("/api/settings");setSettings(value);if(value.maxSteps)setMaxSteps(value.maxSteps);if(value.screenRefreshMs)setScreenRefreshMs(value.screenRefreshMs);if(value.deviceRefreshMs)setDeviceRefreshMs(value.deviceRefreshMs);setShowSettings(true)}
-  async function saveSettings(){const {apiKeyConfigured,...body}=settings;const response=await fetch("/api/settings",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(body)});const payload=await response.json() as Api<Settings>;if(!payload.ok){setError(payload.error?.message||"Không thể lưu cài đặt");return}setSettings({...payload.data,apiKeyConfigured});if(payload.data.maxSteps)setMaxSteps(payload.data.maxSteps);if(payload.data.screenRefreshMs)setScreenRefreshMs(payload.data.screenRefreshMs);if(payload.data.deviceRefreshMs)setDeviceRefreshMs(payload.data.deviceRefreshMs);setShowSettings(false)}
+  async function openSettings(){const value=await get<Settings>("/api/settings");setSettings(value);if(value.maxSteps)setMaxSteps(value.maxSteps);if(value.screenRefreshMs)setScreenRefreshMs(value.screenRefreshMs);setShowSettings(true)}
+  async function saveSettings(){const {apiKeyConfigured,...body}=settings;const response=await fetch("/api/settings",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(body)});const payload=await response.json() as Api<Settings>;if(!payload.ok){setError(payload.error?.message||"Không thể lưu cài đặt");return}setSettings({...payload.data,apiKeyConfigured});if(payload.data.maxSteps)setMaxSteps(payload.data.maxSteps);if(payload.data.screenRefreshMs)setScreenRefreshMs(payload.data.screenRefreshMs);setShowSettings(false)}
 
   async function createConversation() {
     const response = await fetch("/api/conversations", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
@@ -172,6 +177,7 @@ export default function AppShell() {
         {!conversation && <div className="empty"><div className="spark">✦</div><h2>Điều khiển Android bằng AI</h2><p>Tạo cuộc trò chuyện, chọn điện thoại rồi mô tả điều bạn muốn thực hiện.</p></div>}
         {conversation?.messages.map((message) => <article key={message.id} className={"message " + message.role}><b>{message.role === "user" ? "Bạn" : "Agent"}</b><p>{message.content}</p></article>)}
         {conversation?.runs.flatMap((item) => item.steps.map((step) => <article className="step" key={step.id}><div><span>Bước {step.stepNo}</span><b>{step.action?.action || "trạng thái"}</b></div><p>{step.summary}</p><small>{step.durationMs ? step.durationMs + " ms" : ""}</small></article>))}
+        {liveStep&&<article className="step liveStep"><div><span>Bước {liveStep.step}/{liveStep.maxSteps}</span><b>đang chạy</b></div><p>{liveStep.phase}</p><small>Đang xử lý…</small></article>}
       </div>
       <footer>
         <textarea value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="Ví dụ: Mở Cài đặt và vào mục Wi-Fi..." disabled={active} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} />
@@ -181,11 +187,10 @@ export default function AppShell() {
     </section>
 
     <aside className="device">
-      <header><div><h2>Màn hình Android</h2><span className="live">● {streamSession?.mode==="scrcpy"?"SCRCPY":"SNAPSHOT"}</span></div><select value={selected} disabled={active} onChange={(event) => setSelected(event.target.value)}><option value="">{devices.length ? "Chọn điện thoại" : "Không tìm thấy điện thoại"}</option>{devices.map((device) => <option key={device.serial} value={device.state === "device" ? device.serial : ""} disabled={device.state !== "device"}>{device.displayName} · {device.state}</option>)}</select></header>
+      <header><div><h2>Màn hình Android</h2><span className="live">● {streamSession?.mode==="scrcpy"?"SCRCPY":"SNAPSHOT"}</span></div><div style={{display:"flex",alignItems:"stretch",gap:8,marginBottom:0}}><select style={{minWidth:0}} value={selected} disabled={active} onChange={(event) => setSelected(event.target.value)}><option value="">{devices.length ? "Chọn điện thoại" : "Không tìm thấy điện thoại"}</option>{devices.map((device) => <option key={device.serial} value={device.state === "device" ? device.serial : ""} disabled={device.state !== "device"}>{device.displayName} · {device.state}</option>)}</select><button className="run" style={{width:40,padding:0,fontSize:20}} type="button" onClick={loadDevices} disabled={devicesRefreshing} aria-label={devicesRefreshing?"Đang làm mới danh sách thiết bị":"Làm mới danh sách thiết bị"} title="Làm mới danh sách thiết bị">↻</button></div></header>
       <div className="phoneWrap">{selected ? <div className="phone"><AndroidStreamPlayer session={streamSession} refresh={refresh} onPointerDown={(event)=>drag.current=point(event)} onPointerUp={(event)=>{const end=point(event),start=drag.current;drag.current=null;if(!start)return;const distance=Math.hypot(end.x-start.x,end.y-start.y);void action(distance>30?{type:"swipe",...start,x2:end.x,y2:end.y,durationMs:300}:{type:"tap",x:end.x,y:end.y})}}/></div> : <div className="noPhone"><span>▯</span><b>Chưa có thiết bị</b><p>Bật USB debugging và xác nhận quyền ADB trên điện thoại.</p></div>}</div>
-      <div className="keys">{[["↩", "Quay lại", 4], ["⌂", "Trang chủ", 3], ["▣", "Gần đây", 187], ["⏻", "Nguồn", 26], ["＋", "Âm lượng +", 24], ["−", "Âm lượng -", 25]].map(([icon, label, keycode]) => <button key={String(label)} disabled={!selected || active} onClick={() => action({ type: "keyevent", keycode })}><b>{icon}</b><small>{label}</small></button>)}</div>
       <div className="deviceInfo">{currentDevice ? <><span>{currentDevice.width} × {currentDevice.height}</span><button onClick={()=>setStreamGeneration(value=>value+1)}>Kết nối lại</button><button onClick={()=>setRefresh(value=>value+1)}>Chụp mới</button><span>{streamSession?.mode==="scrcpy"?"Video scrcpy":"Ảnh chụp ADB"}</span></> : <span>Chờ kết nối...</span>}</div>
     </aside>
-    {showSettings&&<div className="modalBackdrop" onClick={()=>setShowSettings(false)}><section className="modal" onClick={event=>event.stopPropagation()}><h2>Cài đặt</h2><label>Model<input value={settings.model||""} placeholder="gpt-4o" onChange={event=>setSettings({...settings,model:event.target.value})}/></label><label>Base URL<input value={settings.baseUrl||""} placeholder="https://api.openai.com/v1" onChange={event=>setSettings({...settings,baseUrl:event.target.value})}/></label><label>Số bước tối đa<input type="number" min="1" max="50" value={settings.maxSteps||15} onChange={event=>setSettings({...settings,maxSteps:Number(event.target.value)})}/></label><label>Làm mới thiết bị (ms)<input type="number" min="1000" max="60000" value={settings.deviceRefreshMs||3000} onChange={event=>setSettings({...settings,deviceRefreshMs:Number(event.target.value)})}/></label><label>Làm mới màn hình (ms)<input type="number" min="300" max="10000" value={settings.screenRefreshMs||900} onChange={event=>setSettings({...settings,screenRefreshMs:Number(event.target.value)})}/></label><p>API key: {settings.apiKeyConfigured?"Đã cấu hình trong .env":"Chưa cấu hình"}</p><div><button onClick={()=>setShowSettings(false)}>Hủy</button><button className="run" onClick={saveSettings}>Lưu</button></div></section></div>}
+    {showSettings&&<div className="modalBackdrop" onClick={()=>setShowSettings(false)}><section className="modal" onClick={event=>event.stopPropagation()}><h2>Cài đặt</h2><label>Model<input value={settings.model||""} placeholder="gpt-4o" onChange={event=>setSettings({...settings,model:event.target.value})}/></label><label>Base URL<input value={settings.baseUrl||""} placeholder="https://api.openai.com/v1" onChange={event=>setSettings({...settings,baseUrl:event.target.value})}/></label><label>Số bước tối đa<input type="number" min="1" max="50" value={settings.maxSteps||50} onChange={event=>setSettings({...settings,maxSteps:Number(event.target.value)})}/></label><label>Làm mới màn hình (ms)<input type="number" min="300" max="10000" value={settings.screenRefreshMs||900} onChange={event=>setSettings({...settings,screenRefreshMs:Number(event.target.value)})}/></label><p>API key: {settings.apiKeyConfigured?"Đã cấu hình trong .env":"Chưa cấu hình"}</p><div><button onClick={()=>setShowSettings(false)}>Hủy</button><button className="run" onClick={saveSettings}>Lưu</button></div></section></div>}
   </main>;
 }
