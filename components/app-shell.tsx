@@ -6,7 +6,7 @@ import { containedMediaViewport, pointerToNormalized } from "@/lib/shared/coordi
 import {AndroidStreamPlayer,type ClientStreamSession} from "@/components/android-stream-player";
 
 type Api<T> = { ok: boolean; data: T; error?: { message: string } };
-type Settings={model?:string;baseUrl?:string;maxSteps?:number;screenRefreshMs?:number;apiKeyConfigured?:boolean};
+type Settings={model?:string;baseUrl?:string;maxSteps?:number;screenRefreshMs?:number;apiKey?:string;apiKeyConfigured?:boolean};
 
 async function get<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: "no-store" });
@@ -30,12 +30,23 @@ export default function AppShell() {
   const [settings,setSettings]=useState<Settings>({});
   const [streamSession,setStreamSession]=useState<ClientStreamSession|null>(null);
   const [streamGeneration,setStreamGeneration]=useState(0);
+  const [runSubmitting,setRunSubmitting]=useState(false);
   const [controlPending,setControlPending]=useState<"pause"|"resume"|"cancel"|null>(null);
   const [liveStep,setLiveStep]=useState<{step:number;maxSteps:number;phase:string}|null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
+  const timelineRef=useRef<HTMLDivElement>(null);
   const conversationInitialized=useRef(false);
   const run = useMemo(() => conversation?.runs.at(-1) || null, [conversation]);
   const active = Boolean(run && ["queued", "running", "pausing", "paused", "cancelling"].includes(run.status));
+  const interactionLocked=active||runSubmitting;
+  const onlineDeviceCount=devices.filter(device=>device.state==="device").length;
+  const completedStepCount=conversation?.runs.reduce((total,item)=>total+item.steps.length,0)??0;
+  const timelineItems=useMemo(()=>{
+    if(!conversation)return [];
+    const messages=conversation.messages.map(message=>({kind:"message" as const,createdAt:message.createdAt,tieOrder:message.role==="user"?0:2,message}));
+    const steps=conversation.runs.flatMap((item,runIndex)=>item.steps.map(step=>({kind:"step" as const,createdAt:step.createdAt,tieOrder:1,step,runIndex})));
+    return [...messages,...steps].sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.tieOrder-b.tieOrder);
+  },[conversation]);
 
   const loadDevices = useCallback(async () => {
     setDevicesRefreshing(true);
@@ -95,12 +106,23 @@ export default function AppShell() {
     return () => clearInterval(timer);
   }, [selected,screenRefreshMs]);
 
+  useEffect(()=>{
+    if(!active&&!liveStep)return;
+    const frame=requestAnimationFrame(()=>{
+      const timeline=timelineRef.current;
+      timeline?.scrollTo({top:timeline.scrollHeight,behavior:"smooth"});
+    });
+    return()=>cancelAnimationFrame(frame);
+  },[active,completedStepCount,liveStep?.step,liveStep?.phase]);
+
   async function renameConversation(){if(!conversation)return;const title=window.prompt("Tên cuộc trò chuyện",conversation.title)?.trim();if(!title)return;const response=await fetch("/api/conversations/"+conversation.id,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({title})});const payload=await response.json() as Api<Conversation>;if(payload.ok){setConversation(payload.data);await loadConversations()}else setError(payload.error?.message||"Không thể đổi tên")}
 
   async function deleteConversation(){if(!conversation||!window.confirm("Xóa cuộc trò chuyện này?"))return;const response=await fetch("/api/conversations/"+conversation.id,{method:"DELETE"});const payload=await response.json() as Api<{id:string}>;if(!payload.ok){setError(payload.error?.message||"Không thể xóa");return}setConversation(null);await loadConversations()}
 
-  async function openSettings(){const value=await get<Settings>("/api/settings");setSettings(value);if(value.maxSteps)setMaxSteps(value.maxSteps);if(value.screenRefreshMs)setScreenRefreshMs(value.screenRefreshMs);setShowSettings(true)}
-  async function saveSettings(){const {apiKeyConfigured,...body}=settings;const response=await fetch("/api/settings",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(body)});const payload=await response.json() as Api<Settings>;if(!payload.ok){setError(payload.error?.message||"Không thể lưu cài đặt");return}setSettings({...payload.data,apiKeyConfigured});if(payload.data.maxSteps)setMaxSteps(payload.data.maxSteps);if(payload.data.screenRefreshMs)setScreenRefreshMs(payload.data.screenRefreshMs);setShowSettings(false)}
+  async function deleteAllHistory(){if(interactionLocked||!conversations.length||!window.confirm("Xóa toàn bộ lịch sử trò chuyện? Hành động này không thể hoàn tác."))return;setError("");const response=await fetch("/api/conversations",{method:"DELETE"});const payload=await response.json() as Api<{deleted:number}>;if(!response.ok||!payload.ok){setError(payload.error?.message||"Không thể xóa lịch sử");return}setConversation(null);setConversations([]);conversationInitialized.current=false;setLiveStep(null)}
+
+  async function openSettings(){const value=await get<Settings>("/api/settings");setSettings({...value,apiKey:""});if(value.maxSteps)setMaxSteps(value.maxSteps);if(value.screenRefreshMs)setScreenRefreshMs(value.screenRefreshMs);setShowSettings(true)}
+  async function saveSettings(){const {apiKeyConfigured:_,apiKey,...values}=settings;const body=apiKey?.trim()?{...values,apiKey:apiKey.trim()}:values;const response=await fetch("/api/settings",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(body)});const payload=await response.json() as Api<Settings>;if(!payload.ok){setError(payload.error?.message||"Không thể lưu cài đặt");return}setSettings({...payload.data,apiKey:""});if(payload.data.maxSteps)setMaxSteps(payload.data.maxSteps);if(payload.data.screenRefreshMs)setScreenRefreshMs(payload.data.screenRefreshMs);setShowSettings(false)}
 
   async function createConversation() {
     const response = await fetch("/api/conversations", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
@@ -115,20 +137,24 @@ export default function AppShell() {
   }
 
   async function send() {
-    if (!conversation || !selected || !goal.trim()) return;
-    setError("");
-    const response = await fetch("/api/conversations/" + conversation.id + "/runs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ goal, deviceSerial: selected, maxSteps }),
-    });
-    const payload = (await response.json()) as Api<RunRecord>;
-    if (!payload.ok) {
-      setError(payload.error?.message || "Không thể chạy tác vụ");
-      return;
+    if (!conversation || !selected || !goal.trim() || interactionLocked) return;
+    setError("");setRunSubmitting(true);
+    try {
+      const response = await fetch("/api/conversations/" + conversation.id + "/runs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ goal, deviceSerial: selected, maxSteps }),
+      });
+      const payload = (await response.json()) as Api<RunRecord>;
+      if (!response.ok||!payload.ok) throw new Error(payload.error?.message || "Không thể chạy tác vụ");
+      setGoal("");
+      setConversation(await get<Conversation>("/api/conversations/" + conversation.id));
+      await loadConversations();
+    } catch(cause) {
+      setError(cause instanceof Error?cause.message:String(cause));
+    } finally {
+      setRunSubmitting(false);
     }
-    setGoal("");
-    setConversation(await get<Conversation>("/api/conversations/" + conversation.id));
   }
 
   async function control(type: "pause" | "resume" | "cancel") {
@@ -166,31 +192,32 @@ export default function AppShell() {
     <aside className="sidebar">
       <div className="brand"><span className="logo">A</span><div><b>Android Agent</b><small>Trung tâm điều khiển cục bộ</small></div></div>
       <button className="new" onClick={createConversation}>＋ Cuộc trò chuyện mới</button>
-      <h3>Gần đây</h3>
+      <div className="historyHeading"><h3>Gần đây</h3><button type="button" onClick={deleteAllHistory} disabled={interactionLocked||!conversations.length}>Xóa lịch sử</button></div>
       <div className="conversations">{conversations.map((item) => <button key={item.id} className={conversation?.id === item.id ? "selected" : ""} onClick={() => openConversation(item.id)}><span>{item.title}</span><small>{new Date(item.updatedAt).toLocaleString("vi-VN")}</small></button>)}</div>
-      <div className="sidebarFoot"><span>● {devices.filter((device) => device.state === "device").length} thiết bị trực tuyến</span><button onClick={openSettings}>⚙ Cài đặt</button></div>
+      <div className="sidebarFoot"><button onClick={openSettings}>⚙ Cài đặt</button></div>
     </aside>
 
     <section className="chat">
-      <header><div><h1>{conversation?.title || "Android Vision Agent"}</h1><p>{selected || "Chưa chọn thiết bị"}</p></div><div className="headerActions">{conversation&&<><button onClick={renameConversation}>Đổi tên</button><button onClick={deleteConversation} disabled={active}>Xóa</button></>}<span className={"status "+(run?.status||"idle")}>{run?.status||"sẵn sàng"}</span></div></header>
-      <div className="timeline">
+      <header><div><h1>{conversation?.title || "Android Vision Agent"}</h1><p>{selected || "Chưa chọn thiết bị"}</p></div><div className="headerActions">{conversation&&<><button onClick={renameConversation}>Đổi tên</button><button onClick={deleteConversation} disabled={interactionLocked}>Xóa</button></>}<span className={"status "+(runSubmitting?"running":run?.status||"idle")}>{runSubmitting?"đang gửi":run?.status||"sẵn sàng"}</span></div></header>
+      <div className="timeline" ref={timelineRef}>
         {!conversation && <div className="empty"><div className="spark">✦</div><h2>Điều khiển Android bằng AI</h2><p>Tạo cuộc trò chuyện, chọn điện thoại rồi mô tả điều bạn muốn thực hiện.</p></div>}
-        {conversation?.messages.map((message) => <article key={message.id} className={"message " + message.role}><b>{message.role === "user" ? "Bạn" : "Agent"}</b><p>{message.content}</p></article>)}
-        {conversation?.runs.flatMap((item) => item.steps.map((step) => <article className="step" key={step.id}><div><span>Bước {step.stepNo}</span><b>{step.action?.action || "trạng thái"}</b></div><p>{step.summary}</p><small>{step.durationMs ? step.durationMs + " ms" : ""}</small></article>))}
-        {liveStep&&<article className="step liveStep"><div><span>Bước {liveStep.step}/{liveStep.maxSteps}</span><b>đang chạy</b></div><p>{liveStep.phase}</p><small>Đang xử lý…</small></article>}
+        {timelineItems.map(item=>item.kind==="message"
+          ? <article key={item.message.id} className={"message "+item.message.role}><b>{item.message.role==="user"?"Bạn":"Agent"}</b><p>{item.message.content}</p></article>
+          : <article className="step" key={item.step.id}><div><span>{conversation&&conversation.runs.length>1?"Lần chạy "+(item.runIndex+1)+" · ":""}Bước {item.step.stepNo}</span><b>{item.step.action?.action||"trạng thái"}</b></div><p>{item.step.summary}</p><small>{item.step.durationMs?item.step.durationMs+" ms":""}</small></article>)}
+        {liveStep&&<article className="step liveStep" role="status" aria-live="polite"><div><span>{conversation&&conversation.runs.length>1?"Lần chạy "+conversation.runs.length+" · ":""}Bước {liveStep.step}/{liveStep.maxSteps}</span><b><i className="stepSpinner" aria-hidden="true"/>đang chạy</b></div><p>{liveStep.phase}</p><small>Đang xử lý…</small></article>}
       </div>
       <footer>
-        <textarea value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="Ví dụ: Mở Cài đặt và vào mục Wi-Fi..." disabled={active} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} />
-        <div className="composerRow"><label>Số bước tối đa <input type="number" min="1" max="50" value={maxSteps} onChange={(event) => setMaxSteps(Number(event.target.value))} /></label>{run?.status === "running" && <button onClick={() => control("pause")}>Tạm dừng</button>}{run?.status === "paused" && <button onClick={() => control("resume")}>Tiếp tục</button>}{active && <button className="danger" disabled={Boolean(controlPending)||run?.status==="cancelling"} onClick={() => control("cancel")}>{controlPending==="cancel"||run?.status==="cancelling"?"Đang dừng…":"Dừng"}</button>}<button className="run" disabled={!conversation || !selected || !goal.trim() || active} onClick={send}>Chạy ➜</button></div>
+        <textarea value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="Ví dụ: Mở Cài đặt và vào mục Wi-Fi..." disabled={interactionLocked} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} />
+        <div className="composerRow"><label>Số bước tối đa <input type="number" min="1" max="50" value={maxSteps} disabled={runSubmitting} onChange={(event) => setMaxSteps(Number(event.target.value))} /></label>{run?.status === "running" && <button onClick={() => control("pause")}>Tạm dừng</button>}{run?.status === "paused" && <button onClick={() => control("resume")}>Tiếp tục</button>}{active && <button className="danger" disabled={Boolean(controlPending)||run?.status==="cancelling"} onClick={() => control("cancel")}>{controlPending==="cancel"||run?.status==="cancelling"?"Đang dừng…":"Dừng"}</button>}<button className="run" aria-busy={runSubmitting} disabled={!conversation || !selected || !goal.trim() || interactionLocked} onClick={send}>{runSubmitting?<><i className="commandSpinner" aria-hidden="true"/>Đang gửi…</>:<>Chạy ➜</>}</button></div>
         {error && <p className="error">{error}</p>}
       </footer>
     </section>
 
     <aside className="device">
-      <header><div><h2>Màn hình Android</h2><span className="live">● {streamSession?.mode==="scrcpy"?"SCRCPY":"SNAPSHOT"}</span></div><div style={{display:"flex",alignItems:"stretch",gap:8,marginBottom:0}}><select style={{minWidth:0}} value={selected} disabled={active} onChange={(event) => setSelected(event.target.value)}><option value="">{devices.length ? "Chọn điện thoại" : "Không tìm thấy điện thoại"}</option>{devices.map((device) => <option key={device.serial} value={device.state === "device" ? device.serial : ""} disabled={device.state !== "device"}>{device.displayName} · {device.state}</option>)}</select><button className="run" style={{width:40,padding:0,fontSize:20}} type="button" onClick={loadDevices} disabled={devicesRefreshing} aria-label={devicesRefreshing?"Đang làm mới danh sách thiết bị":"Làm mới danh sách thiết bị"} title="Làm mới danh sách thiết bị">↻</button></div></header>
+      <header><div><h2>Danh sách Thiết bị - {onlineDeviceCount}</h2><span className="live">● {streamSession?.mode==="scrcpy"?"SCRCPY":"SNAPSHOT"}</span></div><div style={{display:"flex",alignItems:"stretch",gap:8,marginBottom:0}}><select style={{minWidth:0}} value={selected} disabled={interactionLocked} onChange={(event) => setSelected(event.target.value)}><option value="">{devices.length ? "Chọn điện thoại" : "Không tìm thấy điện thoại"}</option>{devices.map((device) => <option key={device.serial} value={device.state === "device" ? device.serial : ""} disabled={device.state !== "device"}>{device.displayName} · {device.state}</option>)}</select><button className="run" style={{width:40,padding:0,fontSize:20}} type="button" onClick={loadDevices} disabled={devicesRefreshing} aria-label={devicesRefreshing?"Đang làm mới danh sách thiết bị":"Làm mới danh sách thiết bị"} title="Làm mới danh sách thiết bị">↻</button></div></header>
       <div className="phoneWrap">{selected ? <div className="phone"><AndroidStreamPlayer session={streamSession} refresh={refresh} onPointerDown={(event)=>drag.current=point(event)} onPointerUp={(event)=>{const end=point(event),start=drag.current;drag.current=null;if(!start)return;const distance=Math.hypot(end.x-start.x,end.y-start.y);void action(distance>30?{type:"swipe",...start,x2:end.x,y2:end.y,durationMs:300}:{type:"tap",x:end.x,y:end.y})}}/></div> : <div className="noPhone"><span>▯</span><b>Chưa có thiết bị</b><p>Bật USB debugging và xác nhận quyền ADB trên điện thoại.</p></div>}</div>
       <div className="deviceInfo">{currentDevice ? <><span>{currentDevice.width} × {currentDevice.height}</span><button onClick={()=>setStreamGeneration(value=>value+1)}>Kết nối lại</button><button onClick={()=>setRefresh(value=>value+1)}>Chụp mới</button><span>{streamSession?.mode==="scrcpy"?"Video scrcpy":"Ảnh chụp ADB"}</span></> : <span>Chờ kết nối...</span>}</div>
     </aside>
-    {showSettings&&<div className="modalBackdrop" onClick={()=>setShowSettings(false)}><section className="modal" onClick={event=>event.stopPropagation()}><h2>Cài đặt</h2><label>Model<input value={settings.model||""} placeholder="gpt-4o" onChange={event=>setSettings({...settings,model:event.target.value})}/></label><label>Base URL<input value={settings.baseUrl||""} placeholder="https://api.openai.com/v1" onChange={event=>setSettings({...settings,baseUrl:event.target.value})}/></label><label>Số bước tối đa<input type="number" min="1" max="50" value={settings.maxSteps||50} onChange={event=>setSettings({...settings,maxSteps:Number(event.target.value)})}/></label><label>Làm mới màn hình (ms)<input type="number" min="300" max="10000" value={settings.screenRefreshMs||900} onChange={event=>setSettings({...settings,screenRefreshMs:Number(event.target.value)})}/></label><p>API key: {settings.apiKeyConfigured?"Đã cấu hình trong .env":"Chưa cấu hình"}</p><div><button onClick={()=>setShowSettings(false)}>Hủy</button><button className="run" onClick={saveSettings}>Lưu</button></div></section></div>}
+    {showSettings&&<div className="modalBackdrop" onClick={()=>setShowSettings(false)}><section className="modal" onClick={event=>event.stopPropagation()}><h2>Cài đặt</h2><label>OpenAI API key<input type="password" autoComplete="new-password" value={settings.apiKey||""} placeholder={settings.apiKeyConfigured?"Nhập key mới để thay đổi":"Nhập API key"} onChange={event=>setSettings({...settings,apiKey:event.target.value})}/></label><label>Model<input value={settings.model||""} placeholder="gpt-4o" onChange={event=>setSettings({...settings,model:event.target.value})}/></label><label>Base URL<input value={settings.baseUrl||""} placeholder="https://api.openai.com/v1" onChange={event=>setSettings({...settings,baseUrl:event.target.value})}/></label><label>Số bước tối đa<input type="number" min="1" max="50" value={settings.maxSteps||50} onChange={event=>setSettings({...settings,maxSteps:Number(event.target.value)})}/></label><label>Làm mới màn hình (ms)<input type="number" min="300" max="10000" value={settings.screenRefreshMs||900} onChange={event=>setSettings({...settings,screenRefreshMs:Number(event.target.value)})}/></label><p>API key: {settings.apiKeyConfigured?"Đã cấu hình · để trống nếu không thay đổi":"Chưa cấu hình"}</p><div><button onClick={()=>setShowSettings(false)}>Hủy</button><button className="run" onClick={saveSettings}>Lưu</button></div></section></div>}
   </main>;
 }

@@ -87,6 +87,7 @@ export class SessionRepository {
   get(id:string) { const row=this.database.prepare("SELECT * FROM conversations WHERE id=?").get(id) as ConversationRow|undefined; return row ? this.mapConversation(row,true) : null; }
   renameConversation(id:string,title:string) { const now=new Date().toISOString();const result=this.database.prepare("UPDATE conversations SET title=?,updated_at=? WHERE id=?").run(title,now,id);return result.changes?this.get(id):null; }
   deleteConversation(id:string) { const active=(this.database.prepare("SELECT COUNT(*) AS count FROM runs WHERE conversation_id=? AND status IN ('queued','running','pausing','paused','cancelling')").get(id) as {count:number}).count;if(active)throw new Error("Không thể xóa cuộc trò chuyện đang có tác vụ hoạt động");return this.database.prepare("DELETE FROM conversations WHERE id=?").run(id).changes>0; }
+  deleteAllConversations() { const active=(this.database.prepare("SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued','running','pausing','paused','cancelling')").get() as {count:number}).count;if(active)throw new Error("Không thể xóa lịch sử khi đang có tác vụ hoạt động");return this.database.prepare("DELETE FROM conversations").run().changes; }
   create(title="Cuộc trò chuyện mới") { const now=new Date().toISOString(), id=crypto.randomUUID(); this.database.prepare("INSERT INTO conversations VALUES (?, ?, NULL, ?, ?)").run(id,title,now,now); return this.get(id)!; }
 
   addMessage(id:string, role:Message["role"], content:string) {
@@ -118,5 +119,4 @@ export class SessionRepository {
   close(){this.database.close();}
 }
 
-export const sessionRepository=new SessionRepository();
-
+export const sessionRepository=new SessionRepository(process.env.NODE_ENV==="test"?":memory:":undefined);
