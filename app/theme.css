@@ -1,0 +1,140 @@
+:root{
+  color-scheme:dark;
+  --surface-root:#171615;
+  --surface-sidebar:#1c1b1a;
+  --surface-panel:#191817;
+  --surface-raised:#211f1d;
+  --surface-input:#201f1d;
+  --surface-hover:#27231f;
+  --surface-active:#352821;
+  --border:#302d2a;
+  --border-strong:#403b36;
+  --text:#e6e2de;
+  --text-soft:#aaa49e;
+  --text-muted:#77726d;
+  --accent:#ee7a35;
+  --accent-hover:#f38a49;
+  --accent-soft:#f08a4b24;
+}
+
+html,body{background:var(--surface-root);color:var(--text)}
+.shell{grid-template-columns:224px minmax(420px,1fr) 380px;background:var(--surface-root)}
+.sidebar{padding:13px 10px 12px;border-right:1px solid var(--border);background:var(--surface-sidebar)}
+.brand{gap:9px;padding:1px 4px 18px}
+.logo{width:31px;height:31px;border-radius:6px;background:var(--accent);box-shadow:none;color:#fff;font-size:0}
+.logo::before{content:"A";font-size:16px;font-weight:750;line-height:1}
+.brand b{color:var(--text);font-size:12px;font-weight:650;line-height:1.15}
+.brand small{margin-top:3px;color:var(--text-muted);font-size:0}
+.brand small::after{content:"v0.1.0";font-size:9px;letter-spacing:.01em}
+
+.sidebar .new,.sidebar .scheduleNav{
+  display:flex;
+  align-items:center;
+  width:100%;
+  min-height:34px;
+  margin:1px 0;
+  border:0;
+  border-radius:5px;
+  background:transparent;
+  box-shadow:none;
+  color:#97918b;
+  padding:7px 9px;
+  font-size:11px;
+  font-weight:500;
+  line-height:1;
+  text-align:left;
+  cursor:pointer;
+}
+.sidebar .new:hover,.sidebar .scheduleNav:hover{background:var(--surface-hover);color:var(--text)}
+.shell:has(.schedulePanel) .sidebar .scheduleNav{background:var(--surface-active);color:var(--accent-hover)}
+.sidebar h3{margin:20px 8px 7px;color:#6f6a65;font-size:8px;font-weight:650;letter-spacing:.13em}
+.historyHeading{margin:20px 8px 7px}
+.historyHeading button{color:#736e69;font-size:9px}
+.historyHeading button:hover{color:var(--accent-hover)}
+.conversations{gap:2px}
+.conversations button{position:relative;min-height:38px;border-radius:5px;color:#928d87;padding:7px 8px 7px 28px}
+.conversations button::before{content:"◇";position:absolute;left:9px;top:10px;color:#706b66;font-size:11px}
+.conversations button:hover{background:var(--surface-hover);color:var(--text)}
+.conversations button.selected{background:var(--surface-active);color:var(--accent-hover)}
+.conversations button.selected::before{color:var(--accent)}
+.conversations span{font-size:11px;line-height:1.15}
+.conversations small{margin-top:4px;color:#68635e;font-size:8px}
+.sidebarFoot{padding:12px 0 0;border-top:1px solid var(--border);color:var(--text-muted)}
+.sidebarFoot::before{content:"HỆ THỐNG";padding:0 8px;color:#69645f;font-size:8px;letter-spacing:.13em}
+.sidebarFoot button{margin-top:6px;border-radius:5px;color:#8e8983;padding:8px 9px;text-align:left}
+.sidebarFoot button:hover{background:var(--surface-hover);color:var(--text)}
+
+.chat{border-right-color:var(--border);background:var(--surface-root)}
+.chat>header{border-bottom-color:var(--border);background:#1b1a19;backdrop-filter:none}
+.chat header p{color:var(--text-muted)}
+.status{background:#282522;color:var(--text-soft)}
+.timeline{background:var(--surface-root)}
+.empty{color:var(--text-muted)}
+.empty h2{color:var(--text)}
+.spark{color:var(--accent)}
+.message,.step{border-color:#36312c;background:var(--surface-raised)}
+.message.user{border-color:#68452f;background:#3a2b22}
+.message p,.step p{color:#d5d0cb}
+.step{border-left-color:var(--accent)}
+.step>div{color:var(--text-soft)}
+.step small{color:var(--text-muted)}
+.liveStep{border-color:#62442f;background:#2b231e}
+.liveStep b{color:var(--accent-hover)}
+.stepSpinner,.commandSpinner{border-color:#70472f;border-top-color:var(--accent-hover)}
+.chat footer{border-top-color:var(--border);background:#1b1a19}
+.chat textarea{border-color:var(--border-strong);background:var(--surface-input);color:var(--text)}
+.chat textarea:focus{border-color:var(--accent)}
+.composerRow label{color:var(--text-muted)}
+.composerRow input,.composerRow button{border-color:var(--border-strong);background:#252321;color:var(--text-soft)}
+.new,.run{background:var(--accent);box-shadow:none}
+.new:hover,.run:hover{background:var(--accent-hover)}
+.composerRow .danger{border-color:#694139;color:#ee9a8f}
+
+.device{border-left:0;background:#181716}
+.device select{border-color:var(--border-strong);background:var(--surface-input);color:var(--text)}
+.live{color:#64b99e}
+.phone{border-color:#2c2926;background:#0f0f0e;box-shadow:0 25px 60px #0007}
+.noPhone{color:var(--text-muted)}
+.noPhone span{color:#393532}
+.noPhone b{color:var(--text-soft)}
+.keys{border-top-color:var(--border)}
+.keys button{background:#23211f;color:#918b85}
+.keys button:hover{background:#302c28;color:var(--text)}
+.deviceInfo{color:#68635e}
+.deviceInfo button{color:#817b75}
+
+.modalBackdrop{background:#000a}
+.modal{border-color:var(--border-strong);background:var(--surface-raised)}
+.modal label,.modal p{color:var(--text-soft)}
+.modal input{border-color:var(--border-strong);background:#171615;color:var(--text)}
+.modal button{border-color:var(--border-strong);background:#292623;color:var(--text)}
+
+.schedulePanel{border-right-color:var(--border);background:var(--surface-root)}
+.schedulePanel>.scheduleHeader{background:var(--surface-root)}
+.schedulePanel .scheduleBack:hover{background:var(--surface-hover)}
+.schedulePanel .scheduleCreate{background:var(--accent);color:#fff}
+.schedulePanel .scheduleCreate:hover{background:var(--accent-hover)}
+.scheduleSearch input{border-color:var(--border-strong);background:var(--surface-input)}
+.scheduleSearch input:focus{border-color:#795039;box-shadow:0 0 0 2px var(--accent-soft)}
+.scheduleFilters button.selected{background:var(--surface-active);color:var(--accent-hover)}
+.scheduleList .scheduleRow:hover,.scheduleList .scheduleRow:focus-within{background:#1e1c1b}
+.scheduleList .scheduleRowActions button:hover{background:#302b27}
+.scheduleEmpty h2{color:var(--text-soft)}
+.scheduleList .scheduleEmpty button{border-color:var(--border-strong);background:#292623}
+.scheduleEditor{border-color:var(--border-strong);background:var(--surface-raised)}
+.scheduleEditor>header,.scheduleEditor>footer{border-color:var(--border)}
+.scheduleEditorBody input,.scheduleEditorBody textarea,.scheduleEditorBody select{border-color:var(--border-strong);background:#171615}
+.scheduleEditorBody input:focus,.scheduleEditorBody textarea:focus,.scheduleEditorBody select:focus{border-color:#795039;box-shadow:0 0 0 2px var(--accent-soft)}
+.scheduleDirectory button,.scheduleEditor>footer button{border-color:var(--border-strong);background:#2b2825}
+.scheduleEditor>footer button.primary{border-color:var(--accent);background:var(--accent);color:#fff}
+
+@media(max-width:1100px){
+  .shell{grid-template-columns:64px minmax(0,1fr) 340px}
+  .sidebar{padding-inline:8px}
+  .brand{justify-content:center;padding-inline:0}
+  .logo{margin:0}
+  .sidebar .new,.sidebar .scheduleNav{display:flex;justify-content:center;padding-inline:4px;font-size:0}
+  .sidebar .new::first-letter,.sidebar .scheduleNav::first-letter{font-size:16px}
+  .conversations button{height:36px;padding:0;font-size:0}
+  .conversations button::before{position:static;margin:auto;font-size:14px}
+}
