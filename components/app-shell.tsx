@@ -32,6 +32,7 @@ export default function AppShell() {
   const [streamGeneration,setStreamGeneration]=useState(0);
   const [controlPending,setControlPending]=useState<"pause"|"resume"|"cancel"|null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
+  const conversationInitialized=useRef(false);
   const run = useMemo(() => conversation?.runs.at(-1) || null, [conversation]);
   const active = Boolean(run && ["queued", "running", "pausing", "paused", "cancelling"].includes(run.status));
 
@@ -50,16 +51,16 @@ export default function AppShell() {
   }, []);
 
   const loadConversations = useCallback(async () => {
-    const list = await get<Conversation[]>("/api/conversations");
+    const list=await get<Conversation[]>("/api/conversations");
     setConversations(list);
-    if (!conversation && list[0]) setConversation(await get<Conversation>("/api/conversations/" + list[0].id));
-  }, [conversation]);
+    return list;
+  }, []);
 
   useEffect(()=>{void get<Settings>("/api/settings").then(value=>{setSettings(value);if(value.maxSteps)setMaxSteps(value.maxSteps);if(value.screenRefreshMs)setScreenRefreshMs(value.screenRefreshMs);if(value.deviceRefreshMs)setDeviceRefreshMs(value.deviceRefreshMs)}).catch(cause=>setError(cause instanceof Error?cause.message:String(cause)))},[]);
 
   useEffect(() => {
     void loadDevices();
-    void loadConversations();
+    void loadConversations().then(async list=>{if(!conversationInitialized.current&&list[0]){conversationInitialized.current=true;setConversation(await get<Conversation>("/api/conversations/"+list[0].id))}}).catch(cause=>setError(cause instanceof Error?cause.message:String(cause)));
     const timer = setInterval(() => void loadDevices(),deviceRefreshMs);
     return () => clearInterval(timer);
   }, [loadDevices, loadConversations,deviceRefreshMs]);
@@ -68,13 +69,13 @@ export default function AppShell() {
     if(!conversation)return;
     const currentRun=conversation.runs.at(-1);
     const reload=()=>{void get<Conversation>("/api/conversations/"+conversation.id).then(setConversation);void loadConversations();setRefresh(value=>value+1)};
-    if(!currentRun){return}
+    if(!currentRun||!["queued","running","pausing","paused","cancelling"].includes(currentRun.status)){return}
     const source=new EventSource("/api/runs/"+currentRun.id+"/events");
     source.onopen=reload;source.onmessage=reload;
     for(const type of ["run.status","run.step","run.step.started","run.step.action","run.completed","run.failed","run.cancelled"])source.addEventListener(type,reload);
     source.onerror=()=>{if(source.readyState===EventSource.CLOSED)setTimeout(reload,1000)};
     return()=>source.close();
-  }, [conversation?.id,run?.id,loadConversations]);
+  }, [conversation?.id,run?.id,run?.status,loadConversations]);
 
   useEffect(()=>{
     if(!selected){setStreamSession(null);return}
@@ -99,6 +100,7 @@ export default function AppShell() {
   async function createConversation() {
     const response = await fetch("/api/conversations", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     const payload = (await response.json()) as Api<Conversation>;
+    conversationInitialized.current=true;
     setConversation(payload.data);
     setConversations((items) => [payload.data, ...items]);
   }
