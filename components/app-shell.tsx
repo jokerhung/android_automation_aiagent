@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Conversation, DeviceSummary, RunRecord } from "@/lib/contracts/types";
 import { containedMediaViewport, pointerToNormalized } from "@/lib/shared/coordinates";
+import SchedulePanel from "@/components/schedule-panel";
 import {AndroidStreamPlayer,type ClientStreamSession} from "@/components/android-stream-player";
 
 type Api<T> = { ok: boolean; data: T; error?: { message: string } };
@@ -27,6 +28,7 @@ export default function AppShell() {
   const [devicesRefreshing,setDevicesRefreshing]=useState(false);
   const [screenRefreshMs,setScreenRefreshMs]=useState(900);
   const [showSettings,setShowSettings]=useState(false);
+  const [showSchedules,setShowSchedules]=useState(false);
   const [settings,setSettings]=useState<Settings>({});
   const [streamSession,setStreamSession]=useState<ClientStreamSession|null>(null);
   const [streamGeneration,setStreamGeneration]=useState(0);
@@ -191,13 +193,14 @@ export default function AppShell() {
   return <main className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="logo">A</span><div><b>Android Agent</b><small>Trung tâm điều khiển cục bộ</small></div></div>
-      <button className="new" onClick={createConversation}>＋ Cuộc trò chuyện mới</button>
+      <button className="new" onClick={()=>{setShowSchedules(false);void createConversation()}}>＋ Cuộc trò chuyện mới</button>
+      <button className="scheduleNav" onClick={()=>setShowSchedules(true)}>◷ Lịch chạy</button>
       <div className="historyHeading"><h3>Gần đây</h3><button type="button" onClick={deleteAllHistory} disabled={interactionLocked||!conversations.length}>Xóa lịch sử</button></div>
       <div className="conversations">{conversations.map((item) => <button key={item.id} className={conversation?.id === item.id ? "selected" : ""} onClick={() => openConversation(item.id)}><span>{item.title}</span><small>{new Date(item.updatedAt).toLocaleString("vi-VN")}</small></button>)}</div>
       <div className="sidebarFoot"><button onClick={openSettings}>⚙ Cài đặt</button></div>
     </aside>
 
-    <section className="chat">
+    {showSchedules?<SchedulePanel devices={devices} onClose={()=>setShowSchedules(false)}/>:<section className="chat">
       <header><div><h1>{conversation?.title || "Android Vision Agent"}</h1><p>{selected || "Chưa chọn thiết bị"}</p></div><div className="headerActions">{conversation&&<><button onClick={renameConversation}>Đổi tên</button><button onClick={deleteConversation} disabled={interactionLocked}>Xóa</button></>}<span className={"status "+(runSubmitting?"running":run?.status||"idle")}>{runSubmitting?"đang gửi":run?.status||"sẵn sàng"}</span></div></header>
       <div className="timeline" ref={timelineRef}>
         {!conversation && <div className="empty"><div className="spark">✦</div><h2>Điều khiển Android bằng AI</h2><p>Tạo cuộc trò chuyện, chọn điện thoại rồi mô tả điều bạn muốn thực hiện.</p></div>}
@@ -211,7 +214,7 @@ export default function AppShell() {
         <div className="composerRow"><label>Số bước tối đa <input type="number" min="1" max="50" value={maxSteps} disabled={runSubmitting} onChange={(event) => setMaxSteps(Number(event.target.value))} /></label>{run?.status === "running" && <button onClick={() => control("pause")}>Tạm dừng</button>}{run?.status === "paused" && <button onClick={() => control("resume")}>Tiếp tục</button>}{active && <button className="danger" disabled={Boolean(controlPending)||run?.status==="cancelling"} onClick={() => control("cancel")}>{controlPending==="cancel"||run?.status==="cancelling"?"Đang dừng…":"Dừng"}</button>}<button className="run" aria-busy={runSubmitting} disabled={!conversation || !selected || !goal.trim() || interactionLocked} onClick={send}>{runSubmitting?<><i className="commandSpinner" aria-hidden="true"/>Đang gửi…</>:<>Chạy ➜</>}</button></div>
         {error && <p className="error">{error}</p>}
       </footer>
-    </section>
+    </section>}
 
     <aside className="device">
       <header><div><h2>Danh sách Thiết bị - {onlineDeviceCount}</h2><span className="live">● {streamSession?.mode==="scrcpy"?"SCRCPY":"SNAPSHOT"}</span></div><div style={{display:"flex",alignItems:"stretch",gap:8,marginBottom:0}}><select style={{minWidth:0}} value={selected} disabled={interactionLocked} onChange={(event) => setSelected(event.target.value)}><option value="">{devices.length ? "Chọn điện thoại" : "Không tìm thấy điện thoại"}</option>{devices.map((device) => <option key={device.serial} value={device.state === "device" ? device.serial : ""} disabled={device.state !== "device"}>{device.displayName} · {device.state}</option>)}</select><button className="run" style={{width:40,padding:0,fontSize:20}} type="button" onClick={loadDevices} disabled={devicesRefreshing} aria-label={devicesRefreshing?"Đang làm mới danh sách thiết bị":"Làm mới danh sách thiết bị"} title="Làm mới danh sách thiết bị">↻</button></div></header>

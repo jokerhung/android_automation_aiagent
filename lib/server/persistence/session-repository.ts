@@ -47,6 +47,11 @@ export class SessionRepository {
         event_type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_run_events ON run_events(run_id, created_at);
+      CREATE TABLE IF NOT EXISTS schedules (id TEXT PRIMARY KEY,name TEXT NOT NULL,start_date TEXT NOT NULL,local_time TEXT NOT NULL,timezone TEXT NOT NULL,repeat_days INTEGER NOT NULL,prompt TEXT NOT NULL,device_serial TEXT NOT NULL,log_directory TEXT NOT NULL,status TEXT NOT NULL,next_run_at TEXT,completed_occurrences INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(status,next_run_at);
+      CREATE TABLE IF NOT EXISTS schedule_occurrences (id TEXT PRIMARY KEY,schedule_id TEXT NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,scheduled_for TEXT NOT NULL,status TEXT NOT NULL,conversation_id TEXT,run_id TEXT,started_at TEXT,ended_at TEXT,result TEXT,error_code TEXT,error_message TEXT,log_file TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(schedule_id,scheduled_for));
+      CREATE INDEX IF NOT EXISTS idx_occurrences_schedule ON schedule_occurrences(schedule_id,scheduled_for);
+      CREATE INDEX IF NOT EXISTS idx_occurrences_run ON schedule_occurrences(run_id);
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL
       );
@@ -54,6 +59,10 @@ export class SessionRepository {
       CREATE INDEX IF NOT EXISTS idx_runs_conversation ON runs(conversation_id, started_at);
       CREATE INDEX IF NOT EXISTS idx_steps_run ON run_steps(run_id, step_no);
     `);
+    const occurrenceSql = (this.database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='schedule_occurrences'").get() as {sql?:string}|undefined)?.sql || "";
+    if (/conversation_id TEXT REFERENCES|run_id TEXT REFERENCES/i.test(occurrenceSql)) {
+      this.database.exec(`PRAGMA foreign_keys=OFF; BEGIN; ALTER TABLE schedule_occurrences RENAME TO schedule_occurrences_old; CREATE TABLE schedule_occurrences (id TEXT PRIMARY KEY,schedule_id TEXT NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,scheduled_for TEXT NOT NULL,status TEXT NOT NULL,conversation_id TEXT,run_id TEXT,started_at TEXT,ended_at TEXT,result TEXT,error_code TEXT,error_message TEXT,log_file TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(schedule_id,scheduled_for)); INSERT INTO schedule_occurrences SELECT * FROM schedule_occurrences_old; DROP TABLE schedule_occurrences_old; CREATE INDEX IF NOT EXISTS idx_occurrences_schedule ON schedule_occurrences(schedule_id,scheduled_for); CREATE INDEX IF NOT EXISTS idx_occurrences_run ON schedule_occurrences(run_id); COMMIT; PRAGMA foreign_keys=ON;`);
+    }
   }
 
   private importLegacyJson(databasePath:string) {
@@ -116,6 +125,7 @@ export class SessionRepository {
   listRunEvents(runId:string,after?:string) { let rows:{id:string;event_type:string;payload_json:string;created_at:string}[];if(after){const cursor=this.database.prepare("SELECT rowid FROM run_events WHERE id=? AND run_id=?").get(after,runId) as {rowid:number}|undefined;rows=cursor?(this.database.prepare("SELECT id,event_type,payload_json,created_at FROM run_events WHERE run_id=? AND rowid>? ORDER BY rowid").all(runId,cursor.rowid) as typeof rows):(this.database.prepare("SELECT id,event_type,payload_json,created_at FROM run_events WHERE run_id=? AND created_at>? ORDER BY rowid").all(runId,after) as typeof rows)}else rows=this.database.prepare("SELECT id,event_type,payload_json,created_at FROM run_events WHERE run_id=? ORDER BY rowid").all(runId) as typeof rows;return rows.map(row=>({eventId:row.id,type:row.event_type,runId,data:JSON.parse(row.payload_json),createdAt:row.created_at})); }
   getSettings() { const rows=this.database.prepare("SELECT key,value FROM settings").all() as {key:string;value:string}[];return Object.fromEntries(rows.map(row=>[row.key,JSON.parse(row.value)])); }
   setSettings(values:Record<string,unknown>) { const statement=this.database.prepare("INSERT INTO settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at");const now=new Date().toISOString();this.database.transaction(()=>{for(const [key,value] of Object.entries(values))statement.run(key,JSON.stringify(value),now)})();return this.getSettings(); }
+  getDatabase(){return this.database;}
   close(){this.database.close();}
 }
 

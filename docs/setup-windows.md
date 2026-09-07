@@ -32,3 +32,6 @@ Nút **Cài đặt** ở cuối sidebar cho phép thay đổi model, base URL, m
 
 Sau khi cấu hình `SCRCPY_INTEGRATION`, chạy `npm run verify:release`. Lệnh này kiểm tra môi trường, TypeScript, tests, production build, dependency audit, thiết bị thật và manifest scrcpy. Khi tắt server, runner abort model/ADB đang hoạt động và chờ tối đa 4,5 giây trước khi đóng SQLite.
 
+## Chạy schedule sau khi Windows khởi động
+
+Timer schedule chỉ hoạt động khi tiến trình Node đang chạy. Để tự khởi động, tạo Windows Scheduled Task chạy `npm start` trong thư mục dự án, chọn **Run whether user is logged on or not**, trigger **At startup**, và bật tự khởi động lại khi lỗi. Chạy `npm run build` trước khi cấu hình task. Tài khoản chạy task phải có quyền dùng ADB và ghi vào các thư mục log của schedule.

@@ -20,3 +20,7 @@ export const agentActionSchema=z.object({
  if(v.action==="keyevent"&&(v.keycode===null||![3,4,24,25,26,66,82,187].includes(v.keycode)))ctx.addIssue({code:"custom",message:"keyevent is not allowed"});
 });
 export const runRequestSchema=z.object({goal:z.string().trim().min(1).max(4000),deviceSerial:z.string().min(1).max(200),maxSteps:z.number().int().min(1).max(50).optional()}).strict();
+const datePattern=/^\d{4}-\d{2}-\d{2}$/;const timePattern=/^(?:[01]\d|2[0-3]):[0-5]\d$/;
+export const scheduleInputSchema=z.object({name:z.string().trim().min(1).max(120),startDate:z.string().regex(datePattern),localTime:z.string().regex(timePattern),timezone:z.string().min(1).max(100).refine(value=>{try{new Intl.DateTimeFormat("en",{timeZone:value});return true}catch{return false}},"Invalid timezone"),repeatDays:z.number().int().min(1).max(365),prompt:z.string().trim().min(1).max(10000),deviceSerial:z.string().trim().min(1).max(200),logDirectory:z.string().trim().min(1).max(1000).refine(value=>!value.includes("\0"),"Path contains null byte")}).strict();
+export const schedulePatchSchema=scheduleInputSchema.partial().strict();
+export const logDirectorySchema=z.object({logDirectory:z.string().trim().min(1).max(1000).refine(value=>!value.includes("\0"),"Path contains null byte")}).strict();

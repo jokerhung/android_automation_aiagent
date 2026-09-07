@@ -15,7 +15,9 @@
     "verify:device": "tsx scripts/verify-device.ts",
     "verify:release": "npm run preflight && npm run typecheck && npm test && npm run build && npm audit --omit=dev && npm run verify:device && npm run scrcpy:check",
     "verify:scrcpy-ui": "node scripts/smoke-scrcpy-ui.cjs",
-    "verify:keyboard-isolation": "node scripts/verify-chat-keyboard-isolation.cjs"
+    "verify:keyboard-isolation": "node scripts/verify-chat-keyboard-isolation.cjs",
+    "verify:schedule-ui": "node scripts/verify-schedule-ui.cjs && node scripts/verify-schedule-sse.cjs && node scripts/verify-schedule-crud.cjs",
+    "verify:schedule": "npm run typecheck && npm test -- --run tests/schedule.test.ts tests/schedule-service.test.ts"
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.8.11",
