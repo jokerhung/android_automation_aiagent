@@ -1,0 +1,89 @@
+version: 2
+
+# Dependabot version updates for ws-scrcpy-web.
+#
+# Security updates (CVE-driven) are managed separately via the repo-level
+# "Dependabot security updates" toggle — they fire whenever an advisory
+# lands on a dependency we use, regardless of this schedule.
+#
+# Version updates (non-security upgrades) fire on the schedule below.
+# Tuned for low noise: weekly, batched in Monday morning ET, capped at
+# 5 open PRs per ecosystem.
+
+updates:
+  # npm: tracks package.json + package-lock.json (root only).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    # The typescript-major ignore is gone: the 6->7 migration is complete. Phase 1
+    # removed the compiler-API-bound build tools (ts-loader/ts-node -> swc-loader/tsx)
+    # and phase 2 put the root on TypeScript 7, with dts-bundle-generator -- the last
+    # tool needing the programmatic API -- isolated on TS 6 via a scoped override.
+    # Majors are open for review again.
+    ignore:
+      # @types/node must track the MAJOR of the Node runtime we actually ship
+      # (see scripts/fetch-node.mjs NODE_VERSION), not the newest types on npm.
+      # A types major ahead of the runtime type-checks APIs the shipped Node
+      # does not have -- e.g. Node 24 has Event/CloseEvent/MessageEvent globals
+      # but no ErrorEvent, which tsc happily accepts from newer types and then
+      # fails at runtime. Drifted to 26.x against a Node 24 runtime before this
+      # ignore existed. Lift it in the same PR that bumps the bundled runtime
+      # to the next even-numbered LTS.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    # Batch all minor + patch bumps into ONE weekly PR. Interlocking families
+    # (@xterm/* addons must match the xterm core; webpack + its loaders; the
+    # typescript / swc-loader / tsx toolchain) break when bumped singly.
+    # Grouping keeps them in lockstep; majors still open individually for review.
+    groups:
+      npm-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # github-actions: tracks SHA-pinned action references in .github/workflows/.
+  # Dependabot keys on the `# vX.Y.Z` comment after each SHA to detect
+  # upstream tag movement.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(actions)"
+    # Batch all action bumps into one PR — keeps the codeql-action init/analyze/
+    # upload-sarif refs in lockstep (a split bump mismatches CodeQL versions) and
+    # avoids weekly action-PR pile-ups.
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # docker: tracks the digest-pinned base image in the Dockerfile
+  # (`ARG NODE_IMAGE=node:24-trixie-slim@sha256:…`). Without this entry the pin
+  # never moved: the Docker Scout gate in docker-publish.yml found the base's
+  # bundled npm carrying fixable high CVEs (tar, brace-expansion, ip-address)
+  # that a fresh base would have cleared once upstream rebuilt. Dependabot keys
+  # on the tag in the ARG and rewrites the digest beside it.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(docker)"

@@ -1,3 +1,4 @@
+import "@/lib/server/server-guard";
 import {DOMParser} from "@xmldom/xmldom";import {adbService} from "./adb-service";
 export type UiElement={label:string;bounds:[number,number,number,number];center:[number,number]};
 const attr=(node:Element,name:string)=>node.getAttribute(name)??"";

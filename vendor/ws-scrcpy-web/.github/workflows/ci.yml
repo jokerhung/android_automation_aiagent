@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.x
+          cache: npm
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: npm run build
+
+      # End-to-end suite. Deliberately steps inside build-and-test rather than a
+      # separate job: main's ruleset requires a check named exactly
+      # `build-and-test`, so a new job would not be required and could rot
+      # unnoticed. It also reuses the `npm run build` above -- the suite runs the
+      # built `dist/index.js`, so a second job would have to rebuild it.
+      #
+      # Chromium only. The suite asserts on server behaviour and app DOM, not on
+      # rendering differences, so a second browser would buy coverage the specs
+      # do not actually exercise.
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: E2E typecheck
+        # tests/ sits outside the root tsconfig's rootDir, so `npx tsc --noEmit`
+        # above does not see it. Without this the e2e sources are never typechecked.
+        run: npm run test:e2e:types
+      - name: Suite bundle round-trip
+        # Build the bundle qa-harness consumes, extract it, and typecheck the
+        # suite from inside the extracted copy. A bundle missing a file fails
+        # here, not in the harness as a Playwright module-resolution error a
+        # long way from its cause. Also refuses a qa-manifest.json whose
+        # runner.playwrightVersion drifted from the lockfile.
+        run: node scripts/build-suite-bundle.mjs --out "${{ runner.temp }}/wssw-suite" --verify
+      - run: npm run test:e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+      # Build the image on every PR, without pushing. A Dockerfile that only runs
+      # at release time is a Dockerfile that breaks at release time.
+      #
+      # Here rather than in a job of its own: main's ruleset requires a status
+      # check named exactly `build-and-test`, so a separate job would not be
+      # required and could rot unnoticed — the same reasoning #560 recorded for
+      # the Playwright steps above.
+      #
+      # This is a fast-tier step under spec §9: it runs on a GitHub-hosted runner
+      # and holds no secrets. The tier boundary is secrets and devices, not
+      # containers.
+      # No docker/setup-buildx-action step, deliberately. This repo restricts
+      # Actions to an allow-list (`allowed_actions: selected`), and that action
+      # is not on it — adding the step made the whole workflow fail to start,
+      # with no job and no annotation naming the cause. ubuntu-latest ships the
+      # buildx plugin already, and a single native-platform build with --load
+      # needs nothing more, so the step buys nothing here anyway.
+      - name: Build the container image
+        run: docker buildx build --platform linux/amd64 --load -t ws-scrcpy-web:ci .
+
+      # The @docker project: the same specs and the same support library as the
+      # fast tier above, against the built image instead of a bare
+      # `node dist/index.js`. It runs on a GitHub-hosted runner and holds no
+      # secrets, so it belongs in the fast tier under spec §9 — the tier boundary
+      # is secrets and devices, not containers.
+      #
+      # WSSW_IMAGE points compose at the tag the step above just built, so the
+      # image is not built a second time under another name.
+      #
+      # Ordering is load-bearing: after `npm run build` (the fast-tier Playwright
+      # steps need the host dist/) and after the image build (this starts it).
+      - name: E2E — container suite
+        run: npm run test:e2e:docker
+        env:
+          WSSW_IMAGE: ws-scrcpy-web:ci
+
+      - name: Bump/blob sync
+        # The auto-release bump commit is assembled from an explicit blob list.
+        # Fail here if it no longer matches what bump-version.mjs writes -- the
+        # drift that burned v0.1.30-beta.74.
+        run: node scripts/assert-bump-blob-sync.mjs
+      - name: Version sync (on tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/assert-version-sync.mjs ${{ github.ref_name }}
+
+  # macOS is a run-from-source platform: no installer, no launcher, no tray, no
+  # service, and no packaged build. This leg exists so the darwin code paths are
+  # not permanently unverified -- nobody on the team has a Mac, and every
+  # `process.platform === 'darwin'` branch would otherwise ship on the author's
+  # word alone.
+  #
+  # Deliberately a SEPARATE job, not a matrix on build-and-test: main's ruleset
+  # requires a status check named exactly `build-and-test`, and a matrix renames
+  # the context to `build-and-test (ubuntu-latest)`, which no PR could then
+  # satisfy. Keep this job's name out of the required-checks list too, so a
+  # darwin-only failure never blocks a Windows/Linux release.
+  #
+  # Node steps only. Nothing here builds Rust: the launcher is entirely
+  # `#[cfg(windows)]` / `#[cfg(target_os = "linux")]`, so there is no darwin
+  # launcher to compile.
+  #
+  # NOT covered yet: the per-arch Node sha256 pins in scripts/fetch-node.mjs.
+  # Those are exercised only by release.yml, which is why they can go stale
+  # unnoticed (they did -- pinned to v24.15.0 while NODE_VERSION moved to
+  # v24.19.0). fetch-node.mjs throws on darwin today, so wiring it up here has
+  # to land with the PR that adds the darwin branch; add
+  # `- run: node scripts/fetch-node.mjs` to this job in that PR and the pins
+  # verify themselves on every run.
+  macos-node-checks:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.x
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test

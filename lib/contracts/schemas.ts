@@ -9,7 +9,7 @@ export const manualActionSchema = z.discriminatedUnion("type", [
 ]);
 const nullableCoordinate=normalizedCoordinate.nullable();
 export const agentActionSchema=z.object({
- action:z.enum(["tap","swipe","text","keyevent","wait","finish"]), thought:z.string().min(1).max(2000),
+ action:z.enum(["tap","swipe","text","keyevent","wait","finish"]), thought:z.string().min(1).max(500),
  x:nullableCoordinate,x2:nullableCoordinate,y:nullableCoordinate,y2:nullableCoordinate,
  duration_ms:z.number().int().min(50).max(5000).nullable(), text:z.string().max(500).nullable(),
  keycode:z.number().int().nullable()
@@ -19,4 +19,4 @@ export const agentActionSchema=z.object({
  if(v.action==="text"&&!v.text)ctx.addIssue({code:"custom",message:"text action requires text"});
  if(v.action==="keyevent"&&(v.keycode===null||![3,4,24,25,26,66,82,187].includes(v.keycode)))ctx.addIssue({code:"custom",message:"keyevent is not allowed"});
 });
-export const runRequestSchema=z.object({goal:z.string().trim().min(1).max(4000),deviceSerial:z.string().min(1).max(200),maxSteps:z.number().int().min(1).max(50).default(15)}).strict();
+export const runRequestSchema=z.object({goal:z.string().trim().min(1).max(4000),deviceSerial:z.string().min(1).max(200),maxSteps:z.number().int().min(1).max(50).optional()}).strict();

@@ -1,0 +1,88 @@
+{
+    "name":  "ws-scrcpy-web",
+    "version":  "0.1.30-beta.103",
+    "description":  "Browser-based Android screen mirroring and control, powered by scrcpy",
+    "license":  "GPL-3.0-only",
+    "author":  "bilbospocketses",
+    "repository":  {
+                       "type":  "git",
+                       "url":  "git+https://github.com/bilbospocketses/ws-scrcpy-web.git"
+                   },
+    "bugs":  {
+                 "url":  "https://github.com/bilbospocketses/ws-scrcpy-web/issues"
+             },
+    "homepage":  "https://github.com/bilbospocketses/ws-scrcpy-web#readme",
+    "keywords":  [
+                     "scrcpy",
+                     "android",
+                     "screen-mirroring",
+                     "adb",
+                     "websocket",
+                     "webcodecs",
+                     "remote-control",
+                     "android-tv"
+                 ],
+    "engines":  {
+                    "node":  "\u003e=24"
+                },
+    "scripts":  {
+                    "clean":  "node -e \"require(\u0027fs\u0027).rmSync(\u0027dist\u0027,{recursive:true,force:true})\"",
+                    "build:dev":  "npm run clean \u0026\u0026 webpack --config webpack/ws-scrcpy-web.dev.ts --stats-error-details",
+                    "build":  "npm run clean \u0026\u0026 webpack --config webpack/ws-scrcpy-web.prod.ts --stats-error-details \u0026\u0026 npm run build:types",
+                    "build:types":  "node scripts/build-types.js",
+                    "stage-seed":  "node scripts/stage-seed-node-pty.mjs \u0026\u0026 node scripts/stage-seed-scrcpy-server.mjs \u0026\u0026 node scripts/fetch-node.mjs",
+                    "start":  "npm run stage-seed \u0026\u0026 npm run build \u0026\u0026 node scripts/dev-supervisor.mjs",
+                    "start:no-supervisor":  "npm run build \u0026\u0026 node dist/index.js",
+                    "test":  "vitest run",
+                    "lint":  "npx @biomejs/biome check",
+                    "format":  "npx @biomejs/biome check --write",
+                    "fetch-prebuilts":  "node scripts/fetch-prebuilts.mjs",
+                    "version:bump":  "node scripts/bump-version.mjs",
+                    "version:check":  "node scripts/assert-version-sync.mjs",
+                    "version:check-blobs":  "node scripts/assert-bump-blob-sync.mjs",
+                    "package:stage":  "node scripts/stage-publish.mjs",
+                    "package:linux":  "node scripts/package-linux.mjs",
+                    "package:pack":  "node -e \"if (process.platform !== \u0027win32\u0027) { console.log(\u0027package:pack is Windows-only; use package:linux for AppImage\u0027); process.exit(0); } require(\u0027child_process\u0027).spawnSync(\u0027vpk\u0027, [\u0027pack\u0027,\u0027--packId\u0027,\u0027WsScrcpyWeb\u0027,\u0027--packVersion\u0027,process.env.npm_package_version,\u0027--packDir\u0027,\u0027publish\u0027,\u0027--mainExe\u0027,\u0027ws-scrcpy-web-launcher.exe\u0027,\u0027--packTitle\u0027,\u0027ws-scrcpy-web\u0027,\u0027--packAuthors\u0027,\u0027ws-scrcpy-web contributors\u0027,\u0027--channel\u0027,\u0027stable\u0027,\u0027-o\u0027,\u0027Releases\u0027], {stdio:\u0027inherit\u0027,shell:true});\"",
+                    "test:update-flow":  "pwsh scripts/test-update-flow.ps1",
+                    "release-notes":  "node scripts/extract-changelog.mjs $npm_package_version",
+                    "test:e2e":  "playwright test",
+                    "test:e2e:docker":  "playwright test --config playwright.docker.config.ts",
+                    "test:e2e:device":  "QA_DEVICE=1 QA_EXTERNAL_STACK=1 playwright test --config playwright.docker.config.ts",
+                    "test:e2e:types":  "tsc -p tests/e2e --noEmit",
+                    "test:scrcpy-keyboard":  "vitest run tests/editable-keyboard-target.test.ts --environment jsdom"
+                },
+    "dependencies":  {
+                         "velopack":  "^1.2.0",
+                         "ws":  "^8.21.3"
+                     },
+    "optionalDependencies":  {
+                                 "node-pty":  "^1.1.0"
+                             },
+    "devDependencies":  {
+                            "@biomejs/biome":  "^2.5.11",
+                            "@playwright/test":  "^1.62.1",
+                            "@swc/core":  "^1.16.1",
+                            "@types/node":  "^24.13.3",
+                            "@types/ws":  "^8",
+                            "@xterm/addon-attach":  "^0.12.0",
+                            "@xterm/addon-fit":  "^0.11.0",
+                            "@xterm/xterm":  "^6.0.0",
+                            "css-loader":  "^7.1.5",
+                            "dts-bundle-generator":  "^9.5.1",
+                            "jsdom":  "^30.0.1",
+                            "mini-css-extract-plugin":  "^2.6.1",
+                            "style-loader":  "^4.0.0",
+                            "swc-loader":  "^0.2.7",
+                            "tsx":  "^4.23.13",
+                            "typescript":  "^7.0.2",
+                            "vitest":  "^4.1.11",
+                            "webpack":  "^5.110.2",
+                            "webpack-cli":  "^7.2.3"
+                        },
+    "overrides":  {
+                      "fast-uri":  "^3.1.5",
+                      "dts-bundle-generator":  {
+                                                   "typescript":  "6.0.3"
+                                               }
+                  }
+}

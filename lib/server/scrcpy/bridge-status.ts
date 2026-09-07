@@ -1,0 +1,1 @@
+export type ScrcpyBridgeStatus={available:boolean;clients:number};const key=Symbol.for("android-vision-control.scrcpy-status");const root=globalThis as typeof globalThis&{[key]?:ScrcpyBridgeStatus};export const scrcpyBridgeStatus=root[key]??={available:false,clients:0};

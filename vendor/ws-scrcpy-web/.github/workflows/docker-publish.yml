@@ -1,0 +1,106 @@
+name: Docker publish
+
+# Tag push, NOT release:published -- and this is a correction. release.yml
+# publishes the GitHub Release through softprops/action-gh-release with the
+# default GITHUB_TOKEN, and GitHub never triggers other workflows from events
+# that token creates, so a `release: published` trigger here could never fire.
+# It did not: no run exists for v0.1.30-beta.84 or beta.85, and Docker Hub has
+# no repository. The tag itself is pushed by auto-release with a GitHub App
+# token, whose events DO trigger workflows, so this listens to the same tag
+# push release.yml does. Still decoupled -- a separate workflow -- so a Docker
+# failure never blocks an installer release or vice versa.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No setup-qemu-action: it exists to emulate a foreign architecture, and
+      # `platforms:` below names one native arch. Re-add it alongside arm64 if
+      # docs/adr/2026-09-01-linux-arm64-adb.md is ever lifted.
+      #
+      # setup-buildx IS required, and not as boilerplate: `provenance` and `sbom`
+      # below are BuildKit attestations, which the runner's default docker driver
+      # cannot produce. Dropping this step would silently publish an image with
+      # no provenance and no SBOM.
+      #
+      # This repo restricts Actions to an allow-list (`allowed_actions: selected`)
+      # with SHA pinning enforced, so this action must be present in
+      # actions/permissions/selected-actions or the workflow fails to START --
+      # no job, no annotation naming the cause. Added there 2026-09-03.
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PAT }}
+
+      - name: Compute channel-aware tags
+        id: tags
+        # Same rule as package-linux.mjs — version.includes('-beta'). Stated in
+        # docker-tags.mjs rather than imported from the packaging script so the
+        # workflow has no build-order dependency on the Node toolchain being set
+        # up first; scripts/__tests__/docker-tags.test.mjs asserts the two agree.
+        #
+        # The rule that matters is the negative one: a beta must never become
+        # :latest. That is unit-tested rather than first exercised on a real
+        # release, because it reaches every user who follows the default tag.
+        run: node .github/scripts/docker-tags.mjs "${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      # The Docker Scout gate, and why the image is built twice.
+      #
+      # Scout analyses an image that exists somewhere, so the gate needs one
+      # BEFORE anything reaches the registry: this first build `load`s the image
+      # into the runner's engine under a tag that is never pushed. `load` takes
+      # one platform and cannot carry BuildKit attestations, so this build has
+      # neither; the push below rebuilds from the same builder's cache (a no-op
+      # rebuild, every layer hits) and adds provenance + SBOM there.
+      #
+      # The gate itself: fixable critical and high CVEs fail the step, and the
+      # publish never happens. `only-fixed` is deliberate. An advisory with no
+      # fixed version cannot be acted on, and gating on it would hold every
+      # release hostage to upstream; a fixable one is a bump we have not made.
+      # Docker Hub also has Scout analysis enabled for jchapz30/ws-scrcpy-web,
+      # so images that already shipped are re-evaluated as new advisories land.
+      # This action is on the repo's Actions allow-list (added 2026-09-03).
+      - name: Build into the engine for the Scout gate
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: jchapz30/ws-scrcpy-web:scout-gate
+          provenance: false
+          sbom: false
+
+      - name: Docker Scout gate (fixable critical/high CVEs fail the publish)
+        uses: docker/scout-action@7c6b6c3f7844478ace1ffd4e7aef649053d1f87d # v1.24.0
+        with:
+          command: cves
+          image: local://jchapz30/ws-scrcpy-web:scout-gate
+          only-severities: critical,high
+          only-fixed: true
+          exit-code: true
+          summary: true
+          write-comment: false
+
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          # amd64 only, by user ruling 2026-09-02. Google publishes no arm64
+          # Linux platform-tools, so an arm64 image would build, start, serve the
+          # UI and report healthy — and fail only when a user connects a device.
+          # See docs/adr/2026-09-01-linux-arm64-adb.md in the qa-harness repo and
+          # §16.1 of docs/specs/2026-06-09-sp4-docker-image-design.md.
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          provenance: true
+          sbom: true

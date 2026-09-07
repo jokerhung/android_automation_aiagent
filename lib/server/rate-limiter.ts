@@ -1,0 +1,4 @@
+type Bucket={count:number;resetAt:number};
+export class RateLimiter{private buckets=new Map<string,Bucket>();check(key:string,limit=60,windowMs=60000){const now=Date.now(),bucket=this.buckets.get(key);if(!bucket||bucket.resetAt<=now){this.buckets.set(key,{count:1,resetAt:now+windowMs});this.cleanup(now);return true}if(bucket.count>=limit)return false;bucket.count++;return true}private cleanup(now:number){if(this.buckets.size<1000)return;for(const [key,bucket] of this.buckets)if(bucket.resetAt<=now)this.buckets.delete(key)}}
+export const rateLimiter=new RateLimiter();
+export function requestKey(request:Request,scope:string){const trustProxy=process.env.TRUST_PROXY==="true";const client=trustProxy?request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()||"unknown":"local";return scope+":"+client}

@@ -1,12 +1,29 @@
-import type {AgentAction,ManualAction} from "@/lib/contracts/types";
-import {adbService} from "@/lib/server/adb/adb-service";import {deviceManager} from "@/lib/server/adb/device-manager";import {uiHierarchyService} from "@/lib/server/adb/ui-hierarchy";import {normalizedToPixel} from "@/lib/shared/coordinates";import {resolveTap,systemKeyeventForIntent} from "@/lib/server/agent/tap-grounding";
-const sleep=(ms:number,signal?:AbortSignal)=>new Promise<void>((resolve,reject)=>{const t=setTimeout(resolve,ms);signal?.addEventListener("abort",()=>{clearTimeout(t);reject(new DOMException("Aborted","AbortError"))},{once:true})});
+﻿import "@/lib/server/server-guard";
+import type { AgentAction, ManualAction } from "@/lib/contracts/types";
+import { adbService } from "@/lib/server/adb/adb-service";
+import { deviceManager } from "@/lib/server/adb/device-manager";
+import { uiHierarchyService } from "@/lib/server/adb/ui-hierarchy";
+import { normalizedToPixel } from "@/lib/shared/coordinates";
+import { resolveTap, systemKeyeventForIntent } from "@/lib/server/agent/tap-grounding";
+import { deviceOwnershipRegistry } from "@/lib/server/device-ownership";
+
+const sleep=(ms:number,signal?:AbortSignal)=>new Promise<void>((resolve,reject)=>{const timer=setTimeout(resolve,ms);signal?.addEventListener("abort",()=>{clearTimeout(timer);reject(new DOMException("Aborted","AbortError"))},{once:true})});
 type ActionLike={type?:string;action?:string;thought?:string;x?:number|null;y?:number|null;x2?:number|null;y2?:number|null;durationMs?:number;duration_ms?:number|null;text?:string|null;keycode?:number|null};
-export class DeviceControlService {async execute(serial:string,raw:ManualAction|AgentAction,signal?:AbortSignal){signal?.throwIfAborted();const device=await deviceManager.requireConnected(serial);const action=raw as ActionLike;const type=action.type??action.action;
- if(type==="wait"){const ms=action.durationMs??2000;await sleep(ms,signal);return{type,durationMs:ms}}
- if(type==="text"){if(!action.text)throw new Error("Text is required");await adbService.run(["shell","input","text",action.text.replaceAll(" ","%s")],{serial,signal});return{type}}
- if(type==="keyevent"){if(action.keycode==null)throw new Error("Keycode is required");await adbService.run(["shell","input","keyevent",String(action.keycode)],{serial,signal});return{type,keycode:action.keycode}}
- if(type==="tap"){if(action.x==null||action.y==null)throw new Error("Tap coordinates required");const thought=action.thought??"";const nav=systemKeyeventForIntent(thought);if(nav){await adbService.run(["shell","input","keyevent",String(nav)],{serial,signal});return{type:"keyevent",keycode:nav}}const fresh=await uiHierarchyService.getClickableElements(serial);const hit=resolveTap(action.x,action.y,device.width||1080,device.height||2400,fresh,thought);await adbService.run(["shell","input","tap",String(hit.x),String(hit.y)],{serial,signal});return{type,x:hit.x,y:hit.y,target:hit.target?.label||null}}
- if(type==="swipe"){if([action.x,action.y,action.x2,action.y2].some(v=>v==null))throw new Error("Swipe coordinates required");const p1=normalizedToPixel(action.x!,action.y!,device.width||1080,device.height||2400);const p2=normalizedToPixel(action.x2!,action.y2!,device.width||1080,device.height||2400);const duration=action.durationMs??action.duration_ms??300;await adbService.run(["shell","input","swipe",String(p1.x),String(p1.y),String(p2.x),String(p2.y),String(duration)],{serial,signal});return{type,duration}}
- throw new Error("Unsupported action")}}
+
+export class DeviceControlService {
+ async execute(serial:string,raw:ManualAction|AgentAction,signal?:AbortSignal,source:"manual"|"agent"="manual") {
+  signal?.throwIfAborted();
+  if(source==="manual")deviceOwnershipRegistry.assertManualAllowed(serial);
+  const device=await deviceManager.requireConnected(serial);
+  signal?.throwIfAborted();
+  const action=raw as ActionLike;const type=action.type??action.action;
+  if(type==="wait"){const ms=action.durationMs??action.duration_ms??2000;await sleep(ms,signal);return{type,durationMs:ms}}
+  if(type==="text"){if(!action.text)throw new Error("Text is required");await adbService.run(["shell","input","text",action.text.replaceAll(" ","%s")],{serial,signal});return{type}}
+  if(type==="keyevent"){if(action.keycode==null)throw new Error("Keycode is required");await adbService.run(["shell","input","keyevent",String(action.keycode)],{serial,signal});return{type,keycode:action.keycode}}
+  if(type==="tap"){if(action.x==null||action.y==null)throw new Error("Tap coordinates required");const thought=action.thought??"";const nav=systemKeyeventForIntent(thought);if(nav){await adbService.run(["shell","input","keyevent",String(nav)],{serial,signal});return{type:"keyevent",keycode:nav}}const fresh=await uiHierarchyService.getClickableElements(serial);signal?.throwIfAborted();const hit=resolveTap(action.x,action.y,device.width||1080,device.height||2400,fresh,thought);await adbService.run(["shell","input","tap",String(hit.x),String(hit.y)],{serial,signal});return{type,x:hit.x,y:hit.y,target:hit.target?.label||null}}
+  if(type==="swipe"){if([action.x,action.y,action.x2,action.y2].some(value=>value==null))throw new Error("Swipe coordinates required");const p1=normalizedToPixel(action.x!,action.y!,device.width||1080,device.height||2400);const p2=normalizedToPixel(action.x2!,action.y2!,device.width||1080,device.height||2400);const duration=action.durationMs??action.duration_ms??300;await adbService.run(["shell","input","swipe",String(p1.x),String(p1.y),String(p2.x),String(p2.y),String(duration)],{serial,signal});return{type,duration}}
+  throw new Error("Unsupported action");
+ }
+}
 export const deviceControlService=new DeviceControlService();
+

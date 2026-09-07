@@ -1,0 +1,11 @@
+import {describe,expect,it} from "vitest";
+import {AdbService,type AdbExecutor} from "@/lib/server/adb/adb-service";
+const deferred=<T>()=>{let resolve!:(value:T)=>void;const promise=new Promise<T>(done=>resolve=done);return{promise,resolve}};
+const waitUntil=async(check:()=>boolean)=>{while(!check())await new Promise(resolve=>setImmediate(resolve))};
+const ok={stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};
+describe("ADB service queue",()=>{
+ it("injects immutable serial into every device command",async()=>{const calls:string[][]=[];const execute:AdbExecutor=async args=>{calls.push(args);return ok};const adb=new AdbService("fake-adb",execute);await adb.run(["shell","input","tap","1","2"],{serial:"SERIAL-A"});expect(calls[0]).toEqual(["-s","SERIAL-A","shell","input","tap","1","2"])});
+ it("runs commands sequentially for one serial",async()=>{const first=deferred<typeof ok>(),order:string[]=[];let count=0;const execute:AdbExecutor=async()=>{count++;if(count===1){order.push("first-start");const value=await first.promise;order.push("first-end");return value}order.push("second-start");return ok};const adb=new AdbService("fake",execute);const a=adb.run(["one"],{serial:"A"}),b=adb.run(["two"],{serial:"A"});await waitUntil(()=>order.length>0);expect(order).toEqual(["first-start"]);first.resolve(ok);await Promise.all([a,b]);expect(order).toEqual(["first-start","first-end","second-start"])});
+ it("does not spawn an aborted command waiting in queue",async()=>{const first=deferred<typeof ok>();let calls=0;const execute:AdbExecutor=async()=>{calls++;return calls===1?first.promise:ok};const adb=new AdbService("fake",execute),controller=new AbortController();const a=adb.run(["one"],{serial:"A"}),b=adb.run(["tap"],{serial:"A",signal:controller.signal});controller.abort();first.resolve(ok);await a;await expect(b).rejects.toMatchObject({name:"AbortError"});expect(calls).toBe(1)});
+ it("allows different serials to progress independently",async()=>{const blocked=deferred<typeof ok>();const started:string[]=[];const execute:AdbExecutor=async args=>{const serial=args[1];started.push(serial);return serial==="A"?blocked.promise:ok};const adb=new AdbService("fake",execute);const a=adb.run(["one"],{serial:"A"}),b=adb.run(["two"],{serial:"B"});await b;expect(started).toContain("B");blocked.resolve(ok);await a});
+});

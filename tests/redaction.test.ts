@@ -1,0 +1,2 @@
+import {describe,expect,it} from "vitest";import {redact,safeError} from "@/lib/server/logging/redaction";
+describe("secret redaction",()=>{it("redacts API keys and image payloads",()=>{expect(redact("key sk-abcdefghijklmnopqrstuvwxyz")).not.toContain("abcdefghijklmnopqrstuvwxyz");expect(redact("data:image/jpeg;base64,AAAA1111====")).toContain("[REDACTED]")});it("sanitizes error messages",()=>{expect(safeError(new Error("token sk-1234567890SECRET"))).not.toContain("SECRET")})});

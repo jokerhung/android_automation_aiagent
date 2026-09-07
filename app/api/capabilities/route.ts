@@ -1,0 +1,1 @@
+import {localRequestGuard} from "@/lib/server/request-security";export const dynamic="force-dynamic";export async function GET(request:Request){const denied=localRequestGuard(request);if(denied)return denied;return Response.json({shell:false})}

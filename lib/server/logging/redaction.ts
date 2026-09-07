@@ -1,0 +1,1 @@
+const secretPatterns=[/sk-[A-Za-z0-9_-]{10,}/g,/data:image\/[a-z+.-]+;base64,[A-Za-z0-9+/=]+/gi];export function redact(value:string){return secretPatterns.reduce((text,pattern)=>text.replace(pattern,"[REDACTED]"),value)}export function safeError(error:unknown){return redact(error instanceof Error?error.message:String(error))}

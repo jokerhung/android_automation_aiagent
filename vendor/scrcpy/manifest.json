@@ -1,0 +1,26 @@
+{
+  "status": "gplv3-approved-and-integrated",
+  "candidate": {
+    "repository": "https://github.com/bilbospocketses/ws-scrcpy-web",
+    "tag": "v0.1.30-beta.103",
+    "commit": "269c97b9373b17ff6fdd53a377394cdf256222cb",
+    "license": "GPL-3.0-only",
+    "node": ">=24",
+    "ws": "8.21.3"
+  },
+  "scrcpyServer": {
+    "version": "4.1",
+    "license": "Apache-2.0",
+    "sha256": "deacb991ed2509715160ffdc7907e47b4160eb30d1566217e9047fd5b8850cae"
+  },
+  "allowedDecisions": [
+    "gplv3",
+    "clean-room",
+    "snapshot"
+  ],
+  "implementation": {
+    "snapshot": true,
+    "gplv3": true,
+    "clean-room": false
+  }
+}

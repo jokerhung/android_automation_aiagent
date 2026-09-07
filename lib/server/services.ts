@@ -1,1 +1,2 @@
+import "@/lib/server/server-guard";
 import {deviceManager} from "./adb/device-manager";import {adbService} from "./adb/adb-service";import {uiHierarchyService} from "./adb/ui-hierarchy";import {deviceControlService} from "./scrcpy/device-control-service";import {sessionRepository} from "./persistence/session-repository";import {agentRunner} from "./agent/agent-runner";import {eventBus} from "./event-bus";export const services={deviceManager,adbService,uiHierarchyService,deviceControlService,sessionRepository,agentRunner,eventBus};
