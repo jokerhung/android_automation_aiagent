@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { DeviceSummary, Schedule, ScheduleStatus } from "@/lib/contracts/types";
+import type { DeviceSummary, Schedule, ScheduleRule, ScheduleStatus } from "@/lib/contracts/types";
 
 type Api<T> = { ok: boolean; data: T; error?: { message: string } };
 type Form = Pick<
   Schedule,
-  "name" | "startDate" | "localTime" | "timezone" | "repeatDays" | "prompt" | "deviceSerial" | "logDirectory"
+  "name" | "startDate" | "localTime" | "timezone" | "rule" | "occurrenceLimit" | "prompt" | "deviceSerial" | "logDirectory"
 >;
 type Filter = "all" | "active" | "paused" | "completed";
 type Feedback = { kind: "error" | "success"; message: string } | null;
@@ -25,14 +25,15 @@ const statusLabels: Record<ScheduleStatus, string> = {
   disabled: "Đã vô hiệu hóa",
 };
 
-function initialForm(serial = ""): Form {
-  const date = new Date(Date.now() + 86_400_000);
+function initialForm(serial = "", type: ScheduleRule["type"] = "daily"): Form {
+  const now=new Date(),zone="Asia/Bangkok",date=type==="interval"||type==="weekly"?new Date():new Date(Date.now()+86_400_000),intervalDate=new Intl.DateTimeFormat("en-CA",{timeZone:zone,year:"numeric",month:"2-digit",day:"2-digit"}).format(now),intervalTime=new Intl.DateTimeFormat("en-GB",{timeZone:zone,hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(now);
   return {
     name: "",
-    startDate: date.toISOString().slice(0, 10),
-    localTime: "08:00",
+    startDate: type==="interval"||type==="weekly"?intervalDate:date.toISOString().slice(0,10),
+    localTime: type==="interval"?intervalTime:"08:00",
     timezone: "Asia/Bangkok",
-    repeatDays: 1,
+    rule: type === "interval" ? { type, every: 30, unit: "minutes" } : type === "weekly" ? { type, weekdays: [1] } : { type },
+    occurrenceLimit: type === "interval" || type === "daily" || type === "weekly" ? null : 1,
     prompt: "",
     deviceSerial: serial,
     logDirectory: "D:\\android-agent-logs",
@@ -65,6 +66,8 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
   const [form, setForm] = useState<Form>(() => initialForm(defaultSerial));
   const [editing, setEditing] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [typeMenuOpen, setTypeMenuOpen] = useState(false);
+  const scheduleTypes: Array<{type:ScheduleRule["type"];title:string;detail:string}> = [{type:"interval",title:"Interval",detail:"Chạy sau mỗi khoảng thời gian"},{type:"daily",title:"Daily",detail:"Chạy mỗi ngày"},{type:"weekly",title:"Weekly",detail:"Chạy mỗi tuần vào một ngày"}];
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [feedback, setFeedback] = useState<Feedback>(null);
@@ -93,6 +96,10 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
   }, []);
 
   useEffect(() => {
+    if (!typeMenuOpen) return;const close=(event:MouseEvent)=>{const target=event.target as HTMLElement;if(!target.closest(".scheduleCreateWrap"))setTypeMenuOpen(false)};document.addEventListener("mousedown",close);return()=>document.removeEventListener("mousedown",close);
+  }, [typeMenuOpen]);
+
+  useEffect(() => {
     if (!editorOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !saving) setEditorOpen(false);
@@ -101,11 +108,15 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [editorOpen, saving]);
 
+  const preview = useMemo(() => {
+    const values:string[]=[];let date=form.startDate;const add=(value:string,days:number)=>{const d=new Date(value+"T00:00:00Z");d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10)};const weekday=(value:string)=>{const d=new Date(value+"T00:00:00Z").getUTCDay();return d===0?7:d};if(form.rule.type==="weekly")while(!form.rule.weekdays.includes(weekday(date) as 1|2|3|4|5|6|7))date=add(date,1);for(let i=0;i<Math.min(3,form.occurrenceLimit??3);i++){values.push(date+" "+form.localTime);if(form.rule.type==="weekly"){date=add(date,1);while(!form.rule.weekdays.includes(weekday(date) as 1|2|3|4|5|6|7))date=add(date,1);}else date=add(date,1)}return values;
+  }, [form]);
+
   const endDate = useMemo(() => {
     const [year, month, day] = form.startDate.split("-").map(Number);
-    const date = new Date(Date.UTC(year, month - 1, day + Math.max(0, form.repeatDays - 1)));
+    const date = new Date(Date.UTC(year, month - 1, day + Math.max(0, (form.occurrenceLimit??1) - 1)));
     return Number.isNaN(date.getTime()) ? "—" : date.toISOString().slice(0, 10);
-  }, [form.startDate, form.repeatDays]);
+  }, [form.startDate, form.occurrenceLimit]);
 
   const visibleItems = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("vi");
@@ -115,6 +126,10 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
       return matchesFilter && (!normalizedQuery || searchable.includes(normalizedQuery));
     });
   }, [filter, items, query]);
+
+  function chooseType(type: ScheduleRule["type"]) { setTypeMenuOpen(false); setEditing(null); setForm(initialForm(defaultSerial, type)); setEditorOpen(true); }
+
+  function typeMenuKey(event: React.KeyboardEvent<HTMLDivElement>) { const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=menuitem]"));const index=buttons.indexOf(document.activeElement as HTMLButtonElement);if(event.key==="Escape"){event.preventDefault();setTypeMenuOpen(false)}else if(event.key==="ArrowDown"||event.key==="ArrowUp"){event.preventDefault();buttons[(index+(event.key==="ArrowDown"?1:-1)+buttons.length)%buttons.length]?.focus()}else if((event.key==="Enter"||event.key===" ")&&index>=0){event.preventDefault();buttons[index].click()} }
 
   function openCreate() {
     setEditing(null);
@@ -131,7 +146,8 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
       startDate: item.startDate,
       localTime: item.localTime,
       timezone: item.timezone,
-      repeatDays: item.repeatDays,
+      rule: item.rule,
+      occurrenceLimit: item.occurrenceLimit,
       prompt: item.prompt,
       deviceSerial: item.deviceSerial,
       logDirectory: item.logDirectory,
@@ -225,7 +241,7 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
             <p>Tự động chạy tác vụ Android, đặt lời nhắc và theo dõi tiến độ.</p>
           </div>
         </div>
-        <button className="scheduleCreate" type="button" onClick={openCreate}>Tạo</button>
+        <div className="scheduleCreateWrap"><button className="scheduleCreate" type="button" aria-haspopup="menu" aria-expanded={typeMenuOpen} onClick={()=>setTypeMenuOpen(!typeMenuOpen)}>Tạo</button>{typeMenuOpen&&<div role="menu" aria-label="Chọn loại lịch" className="scheduleTypeMenu" onKeyDown={typeMenuKey}>{scheduleTypes.map(option=><button role="menuitem" key={option.type} type="button" onClick={()=>chooseType(option.type)}><b>{option.title}</b><small>{option.detail}</small></button>)}</div>}</div>
       </header>
 
       <div className="scheduleContent">
@@ -253,8 +269,8 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
                 <span className={`scheduleDot ${isRunning ? "running" : item.status}`} title={isRunning ? "Đang chạy" : statusLabels[item.status]}>{isRunning && <i className="scheduleDotSpinner" />}</span>
                 <div className="scheduleRowContent">
                   <h3>{item.name}</h3>
-                  <p>Hằng ngày lúc {item.localTime} <span>·</span> {relativeNextRun(item.nextRunAt)}</p>
-                  <small>{item.deviceSerial} <span>·</span> {item.completedOccurrences}/{item.repeatDays} lần <span>·</span> {item.logDirectory}</small>
+                  <p>{item.rule.type === "interval" ? `Mỗi ${item.rule.every} ${item.rule.unit}` : item.rule.type === "weekly" ? `Hằng tuần các thứ ${item.rule.weekdays.join(", ")} lúc ${item.localTime}` : `Hằng ngày lúc ${item.localTime}`} <span>·</span> {relativeNextRun(item.nextRunAt)}</p>
+                  <small>{item.deviceSerial} <span>·</span> {(item.rule.type==="interval"||item.rule.type==="daily"||item.rule.type==="weekly")?`${item.completedOccurrences} lần · chạy đến khi tạm dừng hoặc xóa`:`${item.completedOccurrences}/${item.occurrenceLimit} lần`} <span>·</span> {item.logDirectory}</small>
                 </div>
                 <div className="scheduleRowActions">
                   <button type="button" onClick={() => openEdit(item)} disabled={isBusy}>Sửa</button>
@@ -286,12 +302,14 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
             </header>
 
             <div className="scheduleEditorBody">
+              <label className="scheduleWide">Loại lịch<select value={form.rule.type} onChange={(event)=>setForm({...form,occurrenceLimit:event.target.value==="interval"||event.target.value==="daily"||event.target.value==="weekly"?null:(form.occurrenceLimit??1),rule:event.target.value==="interval"?{type:"interval",every:30,unit:"minutes"}:event.target.value==="weekly"?{type:"weekly",weekdays:[1]}:{type:"daily"}})}><option value="interval">Interval</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
               <label className="scheduleWide">Tên công việc<input autoFocus required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-              <label>Ngày bắt đầu<input type="date" required value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.target.value })} /></label>
-              <label>Giờ chạy<input type="time" required value={form.localTime} onChange={(event) => setForm({ ...form, localTime: event.target.value })} /></label>
-              <label>Số ngày lặp lại<input type="number" min="1" max="365" required value={form.repeatDays} onChange={(event) => setForm({ ...form, repeatDays: Number(event.target.value) })} /></label>
-              <label>Múi giờ<input required value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })} /></label>
-              <p className="schedulePreview scheduleWide">Chạy mỗi ngày từ {form.startDate} đến {endDate}, lúc {form.localTime} ({form.timezone}).</p>
+              {form.rule.type === "daily" && <label>Giờ chạy<input type="time" required value={form.localTime} onChange={(event) => setForm({ ...form, localTime: event.target.value })} /></label>}
+              {form.rule.type === "interval" && <><label data-rule-field="interval">Mỗi<input type="number" min={1} required value={form.rule.every} onChange={(event) => setForm({ ...form, rule: { type: "interval", every: Number(event.target.value), unit: form.rule.type === "interval" ? form.rule.unit : "minutes" } })} /></label><label>Đơn vị<select value={form.rule.unit} onChange={(event) => setForm({ ...form, rule: { type: "interval", every: form.rule.type === "interval" ? form.rule.every : 30, unit: event.target.value as "seconds" | "minutes" | "hours" } })}><option value="seconds">giây</option><option value="minutes">phút</option><option value="hours">giờ</option></select></label></>}
+              {form.rule.type === "weekly" && <div className="scheduleWeeklyRow"><fieldset data-rule-field="weekly" className="scheduleWeekdays"><legend>Ngày trong tuần</legend>{[[1,"T2"],[2,"T3"],[3,"T4"],[4,"T5"],[5,"T6"],[6,"T7"],[7,"CN"]].map(([day,label])=><label key={day}><input type="checkbox" checked={form.rule.type==="weekly"&&form.rule.weekdays.includes(day as 1|2|3|4|5|6|7)} onChange={()=>{if(form.rule.type!=="weekly")return;const value=day as 1|2|3|4|5|6|7,current=form.rule.weekdays,next=current.includes(value)?current.filter(item=>item!==value):[...current,value].sort();if(next.length)setForm({...form,rule:{type:"weekly",weekdays:next as (1|2|3|4|5|6|7)[]}})}}/>{label}</label>)}</fieldset><label className="scheduleWeeklyTime">Giờ chạy<input type="time" required value={form.localTime} onChange={(event) => setForm({ ...form, localTime: event.target.value })} /></label></div>}
+              {false && <label>Tổng số lần<input type="number" min="1" max="365" required value={form.occurrenceLimit??1} onChange={(event) => setForm({ ...form, occurrenceLimit: Number(event.target.value) })} /></label>}{(form.rule.type === "interval" || form.rule.type === "daily" || form.rule.type === "weekly") && <p className="scheduleHint">{form.rule.type === "interval" ? "Interval" : form.rule.type === "daily" ? "Daily" : "Weekly"} sẽ chạy liên tục đến khi bạn tạm dừng hoặc xóa công việc.</p>}
+              <label className={form.rule.type === "interval" || form.rule.type === "weekly" ? "scheduleTimezoneLeft" : undefined}>Múi giờ<input required value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })} /></label>
+              <p className="schedulePreview scheduleWide">Ba lần kế tiếp: {preview.join(" · ")} ({form.timezone}).</p>
               <label className="scheduleWide">Prompt<textarea required maxLength={10_000} value={form.prompt} onChange={(event) => { const prompt = event.target.value; setForm({ ...form, prompt, name: form.name || prompt.split(/\r?\n/)[0].trim().slice(0, 120) }); }} /></label>
               <p className="scheduleHint scheduleWide">Prompt được lưu trong SQLite. Không nhập API key hoặc bí mật dài hạn nếu không cần thiết.</p>
               <label className="scheduleWide">Thiết bị<select required value={form.deviceSerial} onChange={(event) => setForm({ ...form, deviceSerial: event.target.value })}><option value="" disabled>Chọn thiết bị</option>{devices.map((device) => <option key={device.serial} value={device.serial}>{device.displayName} · {device.state}</option>)}</select></label>

@@ -1,26 +1,15 @@
-import { z } from "zod";
-export const normalizedCoordinate = z.number().int().min(0).max(1000);
-export const manualActionSchema = z.discriminatedUnion("type", [
- z.object({type:z.literal("tap"),x:normalizedCoordinate,y:normalizedCoordinate}).strict(),
- z.object({type:z.literal("swipe"),x:normalizedCoordinate,y:normalizedCoordinate,x2:normalizedCoordinate,y2:normalizedCoordinate,durationMs:z.number().int().min(50).max(5000).default(300)}).strict(),
- z.object({type:z.literal("text"),text:z.string().min(1).max(500)}).strict(),
- z.object({type:z.literal("keyevent"),keycode:z.number().int().refine(v=>[3,4,24,25,26,66,82,187].includes(v),"Keycode is not allowed")}).strict(),
- z.object({type:z.literal("wait"),durationMs:z.number().int().min(100).max(10000).default(2000)}).strict()
-]);
+import {z} from "zod";
+export const normalizedCoordinate=z.number().int().min(0).max(1000);
+export const manualActionSchema=z.discriminatedUnion("type",[z.object({type:z.literal("tap"),x:normalizedCoordinate,y:normalizedCoordinate}).strict(),z.object({type:z.literal("swipe"),x:normalizedCoordinate,y:normalizedCoordinate,x2:normalizedCoordinate,y2:normalizedCoordinate,durationMs:z.number().int().min(50).max(5000).default(300)}).strict(),z.object({type:z.literal("text"),text:z.string().min(1).max(500)}).strict(),z.object({type:z.literal("keyevent"),keycode:z.number().int().refine(v=>[3,4,24,25,26,66,82,187].includes(v),"Keycode is not allowed")}).strict(),z.object({type:z.literal("wait"),durationMs:z.number().int().min(100).max(10000).default(2000)}).strict()]);
 const nullableCoordinate=normalizedCoordinate.nullable();
-export const agentActionSchema=z.object({
- action:z.enum(["tap","swipe","text","keyevent","wait","finish"]), thought:z.string().min(1).max(500),
- x:nullableCoordinate,x2:nullableCoordinate,y:nullableCoordinate,y2:nullableCoordinate,
- duration_ms:z.number().int().min(50).max(5000).nullable(), text:z.string().max(500).nullable(),
- keycode:z.number().int().nullable()
-}).strict().superRefine((v,ctx)=>{
- if(v.action==="tap"&&(v.x===null||v.y===null))ctx.addIssue({code:"custom",message:"tap requires x and y"});
- if(v.action==="swipe"&&[v.x,v.y,v.x2,v.y2].some(n=>n===null))ctx.addIssue({code:"custom",message:"swipe requires all coordinates"});
- if(v.action==="text"&&!v.text)ctx.addIssue({code:"custom",message:"text action requires text"});
- if(v.action==="keyevent"&&(v.keycode===null||![3,4,24,25,26,66,82,187].includes(v.keycode)))ctx.addIssue({code:"custom",message:"keyevent is not allowed"});
-});
+export const agentActionSchema=z.object({action:z.enum(["tap","swipe","text","keyevent","wait","finish"]),thought:z.string().min(1).max(500),x:nullableCoordinate,x2:nullableCoordinate,y:nullableCoordinate,y2:nullableCoordinate,duration_ms:z.number().int().min(50).max(5000).nullable(),text:z.string().max(500).nullable(),keycode:z.number().int().nullable()}).strict().superRefine((v,ctx)=>{if(v.action==="tap"&&(v.x===null||v.y===null))ctx.addIssue({code:"custom",message:"tap requires x and y"});if(v.action==="swipe"&&[v.x,v.y,v.x2,v.y2].some(n=>n===null))ctx.addIssue({code:"custom",message:"swipe requires all coordinates"});if(v.action==="text"&&!v.text)ctx.addIssue({code:"custom",message:"text action requires text"});if(v.action==="keyevent"&&(v.keycode===null||![3,4,24,25,26,66,82,187].includes(v.keycode)))ctx.addIssue({code:"custom",message:"keyevent is not allowed"})});
 export const runRequestSchema=z.object({goal:z.string().trim().min(1).max(4000),deviceSerial:z.string().min(1).max(200),maxSteps:z.number().int().min(1).max(50).optional()}).strict();
-const datePattern=/^\d{4}-\d{2}-\d{2}$/;const timePattern=/^(?:[01]\d|2[0-3]):[0-5]\d$/;
-export const scheduleInputSchema=z.object({name:z.string().trim().min(1).max(120),startDate:z.string().regex(datePattern),localTime:z.string().regex(timePattern),timezone:z.string().min(1).max(100).refine(value=>{try{new Intl.DateTimeFormat("en",{timeZone:value});return true}catch{return false}},"Invalid timezone"),repeatDays:z.number().int().min(1).max(365),prompt:z.string().trim().min(1).max(10000),deviceSerial:z.string().trim().min(1).max(200),logDirectory:z.string().trim().min(1).max(1000).refine(value=>!value.includes("\0"),"Path contains null byte")}).strict();
-export const schedulePatchSchema=scheduleInputSchema.partial().strict();
-export const logDirectorySchema=z.object({logDirectory:z.string().trim().min(1).max(1000).refine(value=>!value.includes("\0"),"Path contains null byte")}).strict();
+const datePattern=/^\d{4}-\d{2}-\d{2}$/;const timePattern=/^(?:[01]\d|2[0-3]):[0-5]\d$/;const validDate=(value:string)=>{if(!datePattern.test(value))return false;const [y,m,d]=value.split("-").map(Number),date=new Date(Date.UTC(y,m-1,d));return date.getUTCFullYear()===y&&date.getUTCMonth()===m-1&&date.getUTCDate()===d};
+const weekday=z.union([z.literal(1),z.literal(2),z.literal(3),z.literal(4),z.literal(5),z.literal(6),z.literal(7)]);
+export const scheduleRuleSchema=z.discriminatedUnion("type",[z.object({type:z.literal("interval"),every:z.number().int().positive(),unit:z.enum(["seconds","minutes","hours"])}).strict(),z.object({type:z.literal("daily")}).strict(),z.object({type:z.literal("weekly"),weekdays:z.array(weekday).min(1).max(7).refine(days=>new Set(days).size===days.length,"Ngày trong tuần không được trùng")}).strict()]);
+const safePath=z.string().trim().min(1).max(1000).refine(value=>!value.includes("\0"),"Path contains null byte");
+const scheduleShape={name:z.string().trim().min(1).max(120),startDate:z.string().refine(validDate,"Invalid date"),localTime:z.string().regex(timePattern),timezone:z.string().min(1).max(100).refine(value=>{try{new Intl.DateTimeFormat("en",{timeZone:value});return true}catch{return false}},"Invalid timezone"),rule:scheduleRuleSchema,occurrenceLimit:z.number().int().min(1).max(365).nullable(),prompt:z.string().trim().min(1).max(10000),deviceSerial:z.string().trim().min(1).max(200),logDirectory:safePath};
+const intervalBounds=(v:{rule?:z.infer<typeof scheduleRuleSchema>;occurrenceLimit?:number|null},ctx:z.RefinementCtx)=>{if((v.rule?.type==="interval"||v.rule?.type==="daily"||v.rule?.type==="weekly")&&v.occurrenceLimit!==null)ctx.addIssue({code:"custom",message:"Interval phải chạy không giới hạn",path:["occurrenceLimit"]});if(v.rule?.type!=="interval"&&v.rule?.type!=="daily"&&v.rule?.type!=="weekly"&&v.occurrenceLimit===null)ctx.addIssue({code:"custom",message:"Lịch cố định cần tổng số lần",path:["occurrenceLimit"]});if(v.rule?.type!=="interval")return;const {every,unit}=v.rule;if(unit==="seconds"&&every<1)ctx.addIssue({code:"custom",message:"Interval giây tối thiểu 1",path:["rule","every"]});if(unit==="minutes"&&every<1)ctx.addIssue({code:"custom",message:"Interval phút tối thiểu 1",path:["rule","every"]});if(unit==="hours"&&(every<1||every>168))ctx.addIssue({code:"custom",message:"Interval giờ phải từ 1 đến 168",path:["rule","every"]})};
+export const scheduleInputSchema=z.object(scheduleShape).strict().superRefine(intervalBounds);
+export const schedulePatchSchema=z.object(scheduleShape).partial().strict().superRefine(intervalBounds);
+export const logDirectorySchema=z.object({logDirectory:safePath}).strict();

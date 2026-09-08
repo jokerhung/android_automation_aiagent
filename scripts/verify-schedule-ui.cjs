@@ -16,7 +16,10 @@ const { chromium } = require("../vendor/ws-scrcpy-web/node_modules/playwright");
   const filters = await page.locator(".scheduleFilters button").count();
 
   await page.locator("button.scheduleCreate").click();
-  await page.locator(".scheduleEditor").waitFor({ state: "visible", timeout: 5_000 });
+  const menuItems=page.locator(".scheduleTypeMenu [role=menuitem]");
+  const menuCount=await menuItems.count();
+  const forms={};
+  for(const type of ["interval","daily","weekly"]){await page.getByRole("menuitem",{name:new RegExp('^'+type,'i')}).click();await page.locator(".scheduleEditor").waitFor({state:"visible"});forms[type]={interval:await page.locator("[data-rule-field=interval]").count(),weekly:await page.locator("[data-rule-field=weekly]").count(),preview:await page.locator(".schedulePreview").count()};await page.getByRole("button",{name:"Đóng"}).click();await page.locator("button.scheduleCreate").click()}
 
   console.log(JSON.stringify({
     panel: await page.locator(".schedulePanel").count(),
@@ -24,6 +27,8 @@ const { chromium } = require("../vendor/ws-scrcpy-web/node_modules/playwright");
     title,
     search,
     filters,
+    menuCount,
+    forms,
   }));
   await browser.close();
   process.exit(0);
