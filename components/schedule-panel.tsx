@@ -66,8 +66,6 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
   const [form, setForm] = useState<Form>(() => initialForm(defaultSerial));
   const [editing, setEditing] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [typeMenuOpen, setTypeMenuOpen] = useState(false);
-  const scheduleTypes: Array<{type:ScheduleRule["type"];title:string;detail:string}> = [{type:"interval",title:"Interval",detail:"Chạy sau mỗi khoảng thời gian"},{type:"daily",title:"Daily",detail:"Chạy mỗi ngày"},{type:"weekly",title:"Weekly",detail:"Chạy mỗi tuần vào một ngày"}];
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [feedback, setFeedback] = useState<Feedback>(null);
@@ -95,9 +93,6 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
     return () => source.close();
   }, []);
 
-  useEffect(() => {
-    if (!typeMenuOpen) return;const close=(event:MouseEvent)=>{const target=event.target as HTMLElement;if(!target.closest(".scheduleCreateWrap"))setTypeMenuOpen(false)};document.addEventListener("mousedown",close);return()=>document.removeEventListener("mousedown",close);
-  }, [typeMenuOpen]);
 
   useEffect(() => {
     if (!editorOpen) return;
@@ -127,9 +122,7 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
     });
   }, [filter, items, query]);
 
-  function chooseType(type: ScheduleRule["type"]) { setTypeMenuOpen(false); setEditing(null); setForm(initialForm(defaultSerial, type)); setEditorOpen(true); }
 
-  function typeMenuKey(event: React.KeyboardEvent<HTMLDivElement>) { const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=menuitem]"));const index=buttons.indexOf(document.activeElement as HTMLButtonElement);if(event.key==="Escape"){event.preventDefault();setTypeMenuOpen(false)}else if(event.key==="ArrowDown"||event.key==="ArrowUp"){event.preventDefault();buttons[(index+(event.key==="ArrowDown"?1:-1)+buttons.length)%buttons.length]?.focus()}else if((event.key==="Enter"||event.key===" ")&&index>=0){event.preventDefault();buttons[index].click()} }
 
   function openCreate() {
     setEditing(null);
@@ -241,7 +234,7 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
             <p>Tự động chạy tác vụ Android, đặt lời nhắc và theo dõi tiến độ.</p>
           </div>
         </div>
-        <div className="scheduleCreateWrap"><button className="scheduleCreate" type="button" aria-haspopup="menu" aria-expanded={typeMenuOpen} onClick={()=>setTypeMenuOpen(!typeMenuOpen)}>Tạo</button>{typeMenuOpen&&<div role="menu" aria-label="Chọn loại lịch" className="scheduleTypeMenu" onKeyDown={typeMenuKey}>{scheduleTypes.map(option=><button role="menuitem" key={option.type} type="button" onClick={()=>chooseType(option.type)}><b>{option.title}</b><small>{option.detail}</small></button>)}</div>}</div>
+        <button className="scheduleCreate" type="button" aria-haspopup="dialog" onClick={openCreate}>Tạo</button>
       </header>
 
       <div className="scheduleContent">
