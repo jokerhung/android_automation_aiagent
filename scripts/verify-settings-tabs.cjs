@@ -8,7 +8,7 @@ const { chromium } = require("../vendor/ws-scrcpy-web/node_modules/playwright");
   const bundle = await build({
     stdin: {
       contents: `import React, {useState} from "react";import {createRoot} from "react-dom/client";import Dialog from "./components/settings-dialog";
-      function Test(){const [open,setOpen]=useState(false);return <><button id="open" onClick={()=>setOpen(true)}>Open</button>{open&&<Dialog initial={{model:"test-model",baseUrl:"https://example.test/v1",maxSteps:100,screenRefreshMs:900,apiKeyConfigured:true}} onClose={()=>setOpen(false)} onSave={async draft=>{window.saved=draft;if(window.failSave)throw new Error("Test save failure");setOpen(false)}}/>}</>}
+      function Test(){const [open,setOpen]=useState(false);return <><button id="open" onClick={()=>setOpen(true)}>Open</button>{open&&<Dialog autostart={{supported:true,enabled:false,registration:"absent",backgroundReady:true}} initial={{model:"test-model",baseUrl:"https://example.test/v1",maxSteps:100,screenRefreshMs:900,apiKeyConfigured:true}} onClose={()=>setOpen(false)} onSave={async (draft,enabled)=>{window.savedEnabled=enabled;window.saved=draft;if(window.failSave)throw new Error("Test save failure");setOpen(false)}}/>}</>}
       createRoot(document.getElementById("root")).render(<Test/>);`,
       resolveDir: process.cwd(), loader: "tsx",
     },
@@ -30,6 +30,11 @@ const { chromium } = require("../vendor/ws-scrcpy-web/node_modules/playwright");
     await dialog.waitFor();
     assert.equal(await page.getByRole("tab").count(), 3);
     assert.equal(await page.getByRole("tab", { name: "Chung" }).getAttribute("aria-selected"), "true");
+    const toggle = page.getByRole("switch", {name:"Khởi động cùng Windows"});
+    assert.equal(await toggle.getAttribute("aria-checked"), "false");
+    await toggle.press("Space");
+    assert.equal(await toggle.getAttribute("aria-checked"), "true");
+    assert.equal(await page.evaluate(() => window.savedEnabled), undefined);
     const stepsBox = await page.locator("#settings-steps").boundingBox();
     const refreshBox = await page.locator("#settings-refresh").boundingBox();
     assert.ok(Math.abs(stepsBox.x - refreshBox.x) < 1, "General textboxes must share the same left edge");
@@ -58,6 +63,7 @@ const { chromium } = require("../vendor/ws-scrcpy-web/node_modules/playwright");
     await dialog.waitFor({ state: "detached" });
     const saved = await page.evaluate(() => window.saved);
     assert.equal(saved.maxSteps, 75);
+    assert.equal(await page.evaluate(() => window.savedEnabled), true);
     assert.equal(saved.model, "updated-model");
     assert.equal(saved.apiKey, "");
 
@@ -74,9 +80,11 @@ const { chromium } = require("../vendor/ws-scrcpy-web/node_modules/playwright");
 
     await page.locator("#open").click();
     await page.locator("#settings-steps").fill("33");
+    await toggle.click();
     await page.getByRole("button", { name: "Hủy", exact: true }).click();
     await page.locator("#open").click();
     assert.equal(await page.locator("#settings-steps").inputValue(), "100");
+    assert.equal(await toggle.getAttribute("aria-checked"), "false");
     await page.setViewportSize({ width: 390, height: 844 });
     const mobileSteps = await page.locator("#settings-steps").boundingBox();
     const mobileRefresh = await page.locator("#settings-refresh").boundingBox();

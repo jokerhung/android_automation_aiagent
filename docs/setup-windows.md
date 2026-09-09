@@ -34,4 +34,14 @@ Sau khi cấu hình `SCRCPY_INTEGRATION`, chạy `npm run verify:release`. Lện
 
 ## Chạy schedule sau khi Windows khởi động
 
-Timer schedule chỉ hoạt động khi tiến trình Node đang chạy. Để tự khởi động, tạo Windows Scheduled Task chạy `npm start` trong thư mục dự án, chọn **Run whether user is logged on or not**, trigger **At startup**, và bật tự khởi động lại khi lỗi. Chạy `npm run build` trước khi cấu hình task. Tài khoản chạy task phải có quyền dùng ADB và ghi vào các thư mục log của schedule.
+Timer schedule chỉ hoạt động khi tiến trình Node đang chạy. Chế độ tray sử dụng phiên desktop **sau khi đăng nhập**, không phải Windows Service hoặc Session 0.
+
+1. Cài dependencies đầy đủ và chạy `npm run build` trước khi sử dụng chạy nền.
+2. Trong **Cấu hình → Chung**, bật **Khởi động cùng Windows** rồi bấm **Lưu thay đổi**. Mặc định tắt. Hủy hoặc Escape không đăng ký Startup.
+3. Shortcut chỉ thuộc tài khoản hiện tại và installation này, không cần Administrator. Khi đăng nhập, không tự mở trang chủ.
+4. Đóng tab browser không dừng lịch chạy. Dùng icon **A** nền cam ở system tray để mở trang chủ hoặc thoát ứng dụng.
+5. Tắt công tắc không dừng instance hiện tại. Thoát từ tray không gỡ autostart.
+
+Không cấu hình thêm Scheduled Task `Run whether user is logged on or not` cho tray: phiên không tương tác không hiển thị icon. Task/service do bạn tạo thủ công trước đây không được ứng dụng tự xóa; hãy tự dừng/gỡ nếu chúng gây trùng instance. Không bật tự restart server vì có thể phát lại tác vụ không rõ kết quả.
+
+Xem `docs/windows-background.md` để biết lệnh vận hành, lỗi readiness và checklist kiểm thử Windows.

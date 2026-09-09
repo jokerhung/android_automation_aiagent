@@ -2,6 +2,7 @@ import "@/lib/server/server-guard";
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { getApplicationDatabasePath } from "@/lib/server/application-paths";
 import type { AgentAction, Conversation, Message, RunRecord, RunStatus, RunStep } from "@/lib/contracts/types";
 
 type ConversationRow = { id:string; title:string; device_serial:string|null; created_at:string; updated_at:string };
@@ -12,7 +13,7 @@ type StepRow = { id:string; run_id:string; step_no:number; action_json:string|nu
 export class SessionRepository {
   private database: Database.Database;
 
-  constructor(databasePath = path.join(process.cwd(), "data", "app.db")) {
+  constructor(databasePath = getApplicationDatabasePath()) {
     if (databasePath !== ":memory:") fs.mkdirSync(path.dirname(databasePath), { recursive: true });
     this.database = new Database(databasePath);
     this.database.pragma("journal_mode = WAL");

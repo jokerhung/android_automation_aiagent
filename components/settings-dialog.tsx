@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
+import type { AutostartStatus } from "@/lib/contracts/system";
 
 export type Settings = {
   model?: string;
@@ -29,13 +30,16 @@ function TabIcon({ tab }: { tab: Tab }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[tab]}</svg>;
 }
 
-export default function SettingsDialog({ initial, onSave, onClose }: {
+export default function SettingsDialog({ initial, autostart, onSave, onClose }: {
+  autostart: AutostartStatus;
   initial: Settings;
-  onSave: (settings: Settings) => Promise<void>;
+  onSave: (settings: Settings, enabled?: boolean) => Promise<void>;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("general");
   const [draft, setDraft] = useState<Settings>(() => ({ ...initial, apiKey: "" }));
+  const [autostartDraft, setAutostartDraft] = useState<boolean | null>(autostart.enabled);
+  const [autostartTouched, setAutostartTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const dialog = useRef<HTMLFormElement>(null);
@@ -92,8 +96,12 @@ export default function SettingsDialog({ initial, onSave, onClose }: {
     }
     savingRef.current = true;
     setSaving(true);
-    try { await onSave(draft); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Không thể lưu cấu hình."); }
+    try { await onSave(draft, autostartTouched && autostartDraft !== null ? autostartDraft : undefined); }
+    catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Không thể lưu cấu hình.";
+      if (message.startsWith("Đã lưu cấu hình ứng dụng")) setDraft(previous => ({...previous, apiKey: ""}));
+      setError(message);
+    }
     finally { savingRef.current = false; setSaving(false); }
   }
 
@@ -115,6 +123,18 @@ export default function SettingsDialog({ initial, onSave, onClose }: {
         <div className="settingsContent">
           <section id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general" hidden={tab !== "general"}>
             <h3>Chung</h3>
+            <div className="settingsRow">
+              <label htmlFor="settings-autostart">Khởi động cùng Windows
+                <small id="settings-autostart-help">Chạy nền và hiển thị biểu tượng ở khay hệ thống sau khi bạn đăng nhập.</small>
+                <small>Tắt tùy chọn này không dừng ứng dụng đang chạy.</small>
+                <small role="status">{autostart.reason || (autostart.backgroundReady ? "Sẵn sàng chạy nền" : "Chạy nền chưa sẵn sàng")}</small>
+                {autostart.enabled === null && <small>Chưa xác minh được trạng thái. Kiểm tra Startup trong Windows.</small>}
+              </label>
+              <button id="settings-autostart" type="button" role="switch" className="settingsSwitch"
+                aria-label="Khởi động cùng Windows" aria-describedby="settings-autostart-help"
+                aria-checked={autostartDraft === true} disabled={saving || !autostart.supported}
+                onClick={() => { setAutostartTouched(true); setAutostartDraft(autostartDraft !== true); }}><span /></button>
+            </div>
             <div className="settingsRow">
               <label htmlFor="settings-steps">Số bước tối đa<small>Giới hạn số bước cho mỗi lần chạy tác vụ.</small></label>
               <input id="settings-steps" type="number" min="1" max="100" required disabled={saving}
