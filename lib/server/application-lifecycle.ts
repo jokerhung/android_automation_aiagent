@@ -66,6 +66,7 @@ type RuntimeServices = {
   agentRunner: (typeof import("./agent/agent-runner"))["agentRunner"];
   scheduleRepository: (typeof import("./schedule/schedule-repository"))["scheduleRepository"];
   scheduleService: (typeof import("./schedule/schedule-service"))["scheduleService"];
+  emailWorker: (typeof import("./email/email-worker"))["emailWorker"];
   gplScrcpyBridge: (typeof import("./scrcpy/gpl-scrcpy-bridge"))["gplScrcpyBridge"];
 };
 
@@ -138,6 +139,7 @@ async function importRuntimeServices(): Promise<RuntimeServices> {
     runner,
     schedules,
     scheduler,
+    email,
     bridge,
   ] = await Promise.all([
     import("./persistence/session-repository"),
@@ -147,6 +149,7 @@ async function importRuntimeServices(): Promise<RuntimeServices> {
     import("./agent/agent-runner"),
     import("./schedule/schedule-repository"),
     import("./schedule/schedule-service"),
+    import("./email/email-worker"),
     import("./scrcpy/gpl-scrcpy-bridge"),
   ]);
 
@@ -158,6 +161,7 @@ async function importRuntimeServices(): Promise<RuntimeServices> {
     agentRunner: runner.agentRunner,
     scheduleRepository: schedules.scheduleRepository,
     scheduleService: scheduler.scheduleService,
+    emailWorker: email.emailWorker,
     gplScrcpyBridge: bridge.gplScrcpyBridge,
   };
 }
@@ -270,6 +274,7 @@ export async function startApplication(
         critical: true,
         run: () => runtime?.scheduleService.stop(),
       },
+      { name: "email worker drain", critical: true, run: () => runtime?.emailWorker.stop() },
       { name: "device monitor", run: () => runtime?.deviceMonitor.stop() },
       { name: "agent runner", run: () => runtime?.agentRunner.shutdown(4_000) },
       {
@@ -478,6 +483,7 @@ export async function startApplication(
 
     runtime.deviceMonitor.start(runtime.getRuntimeSettings().deviceRefreshMs);
     runtime.scheduleService.start();
+    runtime.emailWorker.start();
 
     if (options.tray) {
       tray = new WindowsTrayController();

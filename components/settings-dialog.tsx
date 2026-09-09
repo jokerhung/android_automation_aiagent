@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import type { AutostartStatus } from "@/lib/contracts/system";
+import type {EmailPublicSettings,EmailSettingsInput} from "@/lib/contracts/email";
 
 export type Settings = {
   model?: string;
@@ -17,6 +18,7 @@ export type Settings = {
 const tabs = [
   { id: "general", label: "Chung" },
   { id: "model", label: "AI Model" },
+  { id: "email", label: "Email" },
   { id: "about", label: "Giới thiệu" },
 ] as const;
 type Tab = (typeof tabs)[number]["id"];
@@ -25,19 +27,25 @@ function TabIcon({ tab }: { tab: Tab }) {
   const paths: Record<Tab, ReactNode> = {
     general: <><path d="M3 6h8m4 0h6M3 12h2m4 0h12M3 18h12m4 0h2"/><circle cx="13" cy="6" r="2"/><circle cx="7" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></>,
     model: <><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z"/></>,
+    email: <><path d="M3 5h18v14H3z"/><path d="m3 6 9 7 9-7"/></>,
     about: <><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></>,
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[tab]}</svg>;
 }
 
-export default function SettingsDialog({ initial, autostart, onSave, onClose }: {
+export type EmailDraft=Omit<EmailSettingsInput,"clearPassword">&{password?:string;clearPassword?:boolean};
+export default function SettingsDialog({ initial, autostart, email, onSave, onClose }: {
   autostart: AutostartStatus;
   initial: Settings;
-  onSave: (settings: Settings, enabled?: boolean) => Promise<void>;
+  email: EmailPublicSettings|null;
+  onSave: (settings: Settings, enabled?: boolean, email?:EmailDraft) => Promise<void>;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("general");
   const [draft, setDraft] = useState<Settings>(() => ({ ...initial, apiKey: "" }));
+  const [emailDraft,setEmailDraft]=useState<EmailDraft>(()=>email?{host:email.host,port:email.port,security:email.security,username:email.username,defaultRecipient:email.defaultRecipient,password:""}:{host:"smtp.gmail.com",port:587,security:"starttls",username:"",defaultRecipient:"",password:""});
+  const [emailTouched,setEmailTouched]=useState(false);
+  const [emailAction,setEmailAction]=useState("");
   const [autostartDraft, setAutostartDraft] = useState<boolean | null>(autostart.enabled);
   const [autostartTouched, setAutostartTouched] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -94,9 +102,10 @@ export default function SettingsDialog({ initial, autostart, onSave, onClose }: 
     if (!draft.model?.trim() || !draft.baseUrl?.trim()) {
       setTab("model"); setError("Vui lòng nhập Model và Base URL."); return;
     }
+    if(emailTouched&&(!emailDraft.host.trim()||!emailDraft.username.trim()||!emailDraft.defaultRecipient.trim()||!Number.isInteger(emailDraft.port)||emailDraft.port<1||emailDraft.port>65535)){setTab("email");setError("Vui lòng nhập đầy đủ cấu hình SMTP hợp lệ.");return;}
     savingRef.current = true;
     setSaving(true);
-    try { await onSave(draft, autostartTouched && autostartDraft !== null ? autostartDraft : undefined); }
+    try { await onSave(draft, autostartTouched && autostartDraft !== null ? autostartDraft : undefined,emailTouched?emailDraft:undefined); }
     catch (cause) {
       const message = cause instanceof Error ? cause.message : "Không thể lưu cấu hình.";
       if (message.startsWith("Đã lưu cấu hình ứng dụng")) setDraft(previous => ({...previous, apiKey: ""}));
@@ -161,6 +170,26 @@ export default function SettingsDialog({ initial, autostart, onSave, onClose }: 
               <label htmlFor="settings-url">Base URL<small>Địa chỉ API của nhà cung cấp model.</small></label>
               <input id="settings-url" disabled={saving} value={draft.baseUrl ?? ""} placeholder="https://api.openai.com/v1" onChange={event => setDraft({ ...draft, baseUrl: event.target.value })}/>
             </div>
+          </section>
+          <section id="settings-panel-email" role="tabpanel" aria-labelledby="settings-tab-email" hidden={tab !== "email"}>
+            <h3>Email</h3>
+            <p className="settingsAboutText">Mật khẩu được bảo vệ bằng Windows DPAPI cho tài khoản hiện tại. Nhà cung cấp có thể yêu cầu App Password.</p>
+            <div className="settingsEmailGrid">
+              <label>SMTP server<input disabled={saving} value={emailDraft.host} onChange={event=>{setEmailTouched(true);setEmailDraft({...emailDraft,host:event.target.value})}} placeholder="smtp.gmail.com"/></label>
+              <label>Port<input type="number" min="1" max="65535" disabled={saving} value={emailDraft.port} onChange={event=>{setEmailTouched(true);setEmailDraft({...emailDraft,port:Number(event.target.value)})}}/></label>
+              <label>Bảo mật<select disabled={saving} value={emailDraft.security} onChange={event=>{const security=event.target.value as "starttls"|"tls";setEmailTouched(true);setEmailDraft({...emailDraft,security,port:security==="tls"?465:587})}}><option value="starttls">TLS/STARTTLS (Port 587)</option><option value="tls">SSL/TLS (Port 465)</option></select></label>
+              <label>Xác thực<span className="settingsEmailAuth"><input type="checkbox" checked disabled/> Bắt buộc (Bật)</span></label>
+              <label>Username (địa chỉ Gmail)<input disabled={saving} autoComplete="username" value={emailDraft.username} onChange={event=>{setEmailTouched(true);setEmailDraft({...emailDraft,username:event.target.value})}}/></label>
+              <label className="settingsEmailWide">Người nhận mặc định<input type="email" disabled={saving} value={emailDraft.defaultRecipient} onChange={event=>{setEmailTouched(true);setEmailDraft({...emailDraft,defaultRecipient:event.target.value})}}/></label>
+              <label className="settingsEmailWide">Mật khẩu ứng dụng 16 ký tự (App Password)<small>{email?.passwordConfigured?"Đã cấu hình · Để trống để giữ nguyên.":"Chưa cấu hình."}</small><input type="password" autoComplete="new-password" disabled={saving} value={emailDraft.password??""} onChange={event=>{setEmailTouched(true);setEmailDraft({...emailDraft,password:event.target.value,clearPassword:false})}}/></label>
+            </div>
+            <div className="settingsEmailActions">
+              <button type="button" disabled={saving||!emailDraft.host.trim()||!emailDraft.username.trim()||!emailDraft.defaultRecipient.trim()||!Number.isInteger(emailDraft.port)||(!emailDraft.password&&!email?.passwordConfigured)} onClick={async()=>{setEmailAction("Đang kiểm tra…");try{const current=await fetch("/api/settings/email",{cache:"no-store"}).then(response=>response.json());const response=await fetch("/api/settings/email/verify",{method:"POST",headers:{"content-type":"application/json","x-autostart-token":current.data?.csrfToken??""},body:JSON.stringify(emailDraft)});const payload=await response.json();setEmailAction(response.ok&&payload.ok?"Xác thực SMTP thành công":"Không thể xác thực: "+(payload.error?.message||"Lỗi"))}catch(cause){setEmailAction(String(cause))}}}>Kiểm tra kết nối</button>
+              <button type="button" disabled={saving||!emailDraft.defaultRecipient.trim()||!emailDraft.host.trim()||!emailDraft.username.trim()||(!emailDraft.password&&!email?.passwordConfigured)} onClick={()=>{if(!window.confirm("Gửi email thử tới "+emailDraft.defaultRecipient+"?"))return;void fetch("/api/settings/email",{cache:"no-store"}).then(response=>response.json()).then(current=>fetch("/api/settings/email/test",{method:"POST",headers:{"content-type":"application/json","x-autostart-token":current.data?.csrfToken??""},body:JSON.stringify({recipient:emailDraft.defaultRecipient,confirm:true,settings:emailDraft})})).then(async response=>{const payload=await response.json();setEmailAction(response.ok&&payload.ok?"Đã gửi email thử":"Gửi thử thất bại: "+(payload.error?.message||"Lỗi"))})}}>Gửi email thử</button>
+              {email?.passwordConfigured&&<button type="button" disabled={saving} onClick={()=>{if(window.confirm("Xóa mật khẩu SMTP đã lưu?")){setEmailTouched(true);setEmailDraft({...emailDraft,password:undefined,clearPassword:true})}}}>Xóa credential</button>}
+            </div>
+            {emailTouched&&<p className="settingsAboutText">Có thay đổi chưa lưu. Bạn có thể kiểm tra hoặc gửi thử bằng bản nháp; cấu hình chỉ được lưu khi nhấn Lưu thay đổi.</p>}
+            {emailAction&&<p role="status" className="settingsAboutText">{emailAction}</p>}
           </section>
           <section id="settings-panel-about" role="tabpanel" aria-labelledby="settings-tab-about" hidden={tab !== "about"}>
             <h3>Giới thiệu</h3>

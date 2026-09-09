@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "dotenv";
+import { scrubLogMessage } from "../lib/server/platform/windows/rotating-log";
 import { acquireInstanceLock, AlreadyRunningError, type InstanceLock } from "../lib/server/platform/windows/instance-lock";
 import { getWindowsInstallationPaths, normalizeAppRoot, type WindowsInstallationPaths } from "../lib/server/platform/windows/paths";
 import { appendBackgroundLog, readBackgroundMetadata, type BackgroundMetadata } from "../lib/server/platform/windows/background-status";
@@ -39,14 +40,14 @@ async function waitStopped(metadata:BackgroundMetadata,deps:BackgroundCliDepende
 
 export function installBackgroundConsoleLogging(paths:WindowsInstallationPaths){
  const format=(values:unknown[])=>values.map(value=>value instanceof Error?(value.stack||value.message):typeof value==="string"?value:JSON.stringify(value)).join(" ");
- const write=(level:string,values:unknown[])=>{try{appendBackgroundLog(paths,`host ${level}: ${format(values)}`)}catch{}};
+ const write=(level:string,values:unknown[])=>{const message=scrubLogMessage(`host ${level}: ${format(values)}`).slice(0,16384);try{appendBackgroundLog(paths,message)}catch(error){process.stderr.write(scrubLogMessage("BACKGROUND_LOG_WRITE_FAILED: "+(error instanceof Error?error.message:String(error))).slice(0,16384)+"\n");}process.stderr.write(message+"\n");};
  console.log=(...values:unknown[])=>write("stdout",values);
  console.info=(...values:unknown[])=>write("stdout",values);
  console.warn=(...values:unknown[])=>write("stderr",values);
  console.error=(...values:unknown[])=>write("stderr",values);
 }
 
-async function host(appRoot:string,deps:BackgroundCliDependencies){Object.assign(deps.env,{NODE_ENV:"production"});const paths=deps.paths(appRoot);installBackgroundConsoleLogging(paths);let lock:InstanceLock|null=null;try{lock=await deps.acquireLock({appRoot,mode:"background"});const startApplication=await deps.loadStartApplication();const lifecycle=await startApplication({instanceLock:lock,mode:"background",tray:true,onShutdownFailure:()=>process.exit(1)});process.once("SIGINT",()=>void lifecycle.shutdown("SIGINT").then(()=>process.exit(0)));process.once("SIGTERM",()=>void lifecycle.shutdown("SIGTERM").then(()=>process.exit(0)));}catch(error){lock?.release();throw error;}}
+async function host(appRoot:string,deps:BackgroundCliDependencies){Object.assign(deps.env,{NODE_ENV:"production"});const paths=deps.paths(appRoot);installBackgroundConsoleLogging(paths);let lock:InstanceLock|null=null;console.info("startup_phase: acquire-lock");try{lock=await deps.acquireLock({appRoot,mode:"background"});console.info("startup_phase: import-application");const startApplication=await deps.loadStartApplication();console.info("startup_phase: start-application");const lifecycle=await startApplication({instanceLock:lock,mode:"background",tray:true,onShutdownFailure:()=>process.exit(1)});console.info("startup_phase: ready", {homeUrl:lifecycle.homeUrl});process.once("SIGINT",()=>void lifecycle.shutdown("SIGINT").then(()=>process.exit(0)));process.once("SIGTERM",()=>void lifecycle.shutdown("SIGTERM").then(()=>process.exit(0)));}catch(error){console.error("startup_phase: failed",error);lock?.release();throw error;}}
 
 async function start(appRoot:string,deps:BackgroundCliDependencies){
  if(deps.platform!=="win32")throw new Error("Background tray mode is supported only on Windows");

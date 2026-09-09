@@ -6,7 +6,7 @@ import type { DeviceSummary, Schedule, ScheduleRule, ScheduleStatus } from "@/li
 type Api<T> = { ok: boolean; data: T; error?: { message: string } };
 type Form = Pick<
   Schedule,
-  "name" | "startDate" | "localTime" | "timezone" | "rule" | "occurrenceLimit" | "prompt" | "deviceSerial" | "logDirectory"
+  "name" | "startDate" | "localTime" | "timezone" | "rule" | "occurrenceLimit" | "prompt" | "deviceSerial" | "logDirectory" | "emailNotification"
 >;
 type Filter = "all" | "active" | "paused" | "completed";
 type Feedback = { kind: "error" | "success"; message: string } | null;
@@ -18,6 +18,7 @@ const filters: Array<{ value: Filter; label: string }> = [
   { value: "completed", label: "Hoàn thành" },
 ];
 
+const emailLabels:Record<string,string>={pending:"Email đang chờ",preparing:"Đang chuẩn bị email",sending:"Đang gửi email",retry_wait:"Email sẽ thử lại",sent:"SMTP đã chấp nhận email",failed:"Gửi email thất bại",blocked_config:"Email bị chặn do cấu hình",attachment_failed:"Không tạo được attachment",delivery_unknown:"Chưa xác định email đã được nhận",cancelled:"Email đã hủy"};
 const statusLabels: Record<ScheduleStatus, string> = {
   active: "Đang hoạt động",
   paused: "Tạm dừng",
@@ -37,6 +38,7 @@ function initialForm(serial = "", type: ScheduleRule["type"] = "daily"): Form {
     prompt: "",
     deviceSerial: serial,
     logDirectory: "D:\\android-agent-logs",
+    emailNotification: {enabled:false},
   };
 }
 
@@ -64,6 +66,7 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
   const defaultSerial = devices.find((device) => device.state === "device")?.serial ?? "";
   const [items, setItems] = useState<Schedule[]>([]);
   const [form, setForm] = useState<Form>(() => initialForm(defaultSerial));
+  const [defaultRecipient,setDefaultRecipient]=useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -86,6 +89,7 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
 
   useEffect(() => {
     void load();
+    void fetch("/api/settings/email",{cache:"no-store"}).then(response=>response.json()).then(payload=>setDefaultRecipient(payload.data?.settings?.defaultRecipient??"")).catch(()=>{});
     const source = new EventSource("/api/schedules/events");
     for (const type of ["schedule.created", "schedule.updated", "schedule.deleted"]) {
       source.addEventListener(type, () => void load());
@@ -144,6 +148,7 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
       prompt: item.prompt,
       deviceSerial: item.deviceSerial,
       logDirectory: item.logDirectory,
+      emailNotification: item.emailNotification??{enabled:false},
     });
     setDirectoryMessage("");
     setFeedback(null);
@@ -207,7 +212,7 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
   }
 
   async function remove(item: Schedule) {
-    if (!window.confirm(`Xóa lịch “${item.name}”?`)) return;
+    if (!window.confirm(`Xóa lịch “${item.name}”?${item.emailNotification?.enabled?" Email chưa gửi sẽ bị hủy; email đang gửi hoặc đã được SMTP chấp nhận không thể thu hồi.":""}`)) return;
     const actionKey = `${item.id}:delete`;
     setPendingAction(actionKey);
     setFeedback(null);
@@ -263,12 +268,19 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
                 <div className="scheduleRowContent">
                   <h3>{item.name}</h3>
                   <p>{item.rule.type === "interval" ? `Mỗi ${item.rule.every} ${item.rule.unit}` : item.rule.type === "weekly" ? `Hằng tuần các thứ ${item.rule.weekdays.join(", ")} lúc ${item.localTime}` : `Hằng ngày lúc ${item.localTime}`} <span>·</span> {relativeNextRun(item.nextRunAt)}</p>
-                  <small>{item.deviceSerial} <span>·</span> {(item.rule.type==="interval"||item.rule.type==="daily"||item.rule.type==="weekly")?`${item.completedOccurrences} lần · chạy đến khi tạm dừng hoặc xóa`:`${item.completedOccurrences}/${item.occurrenceLimit} lần`} <span>·</span> {item.logDirectory}</small>
+                  {item.latestOccurrence?.emailStatus&&<p className="scheduleEmailStatus" title={item.latestOccurrence.emailDelivery?`Người nhận: ${item.latestOccurrence.emailDelivery.recipient}
+Tiêu đề: ${item.latestOccurrence.emailDelivery.subject}
+Số lần thử: ${item.latestOccurrence.emailDelivery.attempts}${item.latestOccurrence.emailDelivery.nextAttemptAt?`
+Thử lại: ${item.latestOccurrence.emailDelivery.nextAttemptAt}`:""}${item.latestOccurrence.emailDelivery.sentAt?`
+SMTP chấp nhận: ${item.latestOccurrence.emailDelivery.sentAt}`:""}${item.latestOccurrence.emailDelivery.errorMessage?`
+Lỗi: ${item.latestOccurrence.emailDelivery.errorMessage}`:""}`:undefined}>{emailLabels[item.latestOccurrence.emailStatus]??item.latestOccurrence.emailStatus}{item.latestOccurrence.emailDelivery?` · ${item.latestOccurrence.emailDelivery.attempts} lần thử`:""}</p>}
+                  <small>{item.deviceSerial} <span>·</span> {item.emailNotification?.enabled?"Có email":"Không email"} <span>·</span> {(item.rule.type==="interval"||item.rule.type==="daily"||item.rule.type==="weekly")?`${item.completedOccurrences} lần · chạy đến khi tạm dừng hoặc xóa`:`${item.completedOccurrences}/${item.occurrenceLimit} lần`} <span>·</span> {item.logDirectory}</small>
                 </div>
                 <div className="scheduleRowActions">
                   <button type="button" onClick={() => openEdit(item)} disabled={isBusy}>Sửa</button>
                   <button type="button" onClick={() => void command(item, item.status === "paused" ? "resume" : "pause")} disabled={isBusy || item.status === "completed" || item.status === "disabled"}>{item.status === "paused" ? "Tiếp tục" : "Tạm dừng"}</button>
                   <button type="button" onClick={() => void command(item, "run-now")} disabled={isBusy}>Chạy ngay</button>
+                  {item.latestOccurrence?.emailStatus&&["failed","blocked_config","attachment_failed","delivery_unknown"].includes(item.latestOccurrence.emailStatus)&&<button type="button" onClick={async()=>{if(item.latestOccurrence?.emailStatus==="delivery_unknown"&&!window.confirm("SMTP có thể đã nhận email. Thử lại có thể gửi trùng. Bạn vẫn muốn tiếp tục?"))return;setPendingAction(item.id+":email-retry");try{const csrf=await fetch("/api/settings/email",{cache:"no-store"}).then(response=>response.json());const response=await fetch("/api/schedules/"+item.id+"/occurrences/"+item.latestOccurrence!.id+"/email/retry",{method:"POST",headers:{"x-autostart-token":csrf.data?.csrfToken??""}});const payload=await response.json();if(!response.ok||!payload.ok)throw new Error(payload.error?.message||"Không thể thử lại email");await load()}catch(cause){setFeedback({kind:"error",message:cause instanceof Error?cause.message:String(cause)})}finally{setPendingAction("")}}}>Thử lại email</button>}
                   <button className="danger" type="button" onClick={() => void remove(item)} disabled={isBusy}>Xóa</button>
                 </div>
               </article>
@@ -306,6 +318,8 @@ export default function SchedulePanel({ devices, onClose }: { devices: DeviceSum
               <label className="scheduleWide">Prompt<textarea required maxLength={10_000} value={form.prompt} onChange={(event) => { const prompt = event.target.value; setForm({ ...form, prompt, name: form.name || prompt.split(/\r?\n/)[0].trim().slice(0, 120) }); }} /></label>
               <p className="scheduleHint scheduleWide">Prompt được lưu trong SQLite. Không nhập API key hoặc bí mật dài hạn nếu không cần thiết.</p>
               <label className="scheduleWide">Thiết bị<select required value={form.deviceSerial} onChange={(event) => setForm({ ...form, deviceSerial: event.target.value })}><option value="" disabled>Chọn thiết bị</option>{devices.map((device) => <option key={device.serial} value={device.serial}>{device.displayName} · {device.state}</option>)}</select></label>
+              <label className="scheduleWide scheduleEmailOpt"><span><input type="checkbox" checked={form.emailNotification?.enabled===true} onChange={event=>setForm({...form,emailNotification:event.target.checked?{enabled:true,to:defaultRecipient,subject:"Kết quả công việc "+(form.name||"Android Agent")}:{enabled:false}})}/> Gửi email sau khi chạy xong</span><small>Email chứa kết quả và file đính kèm các bước; nội dung có thể chứa dữ liệu nhạy cảm.</small></label>
+              {form.emailNotification?.enabled&&<><p className="scheduleWide scheduleEmailEstimate" role="status">Giới hạn gửi toàn cục: 30 email/giờ; backlog tối đa 500. {form.rule.type==="interval"&&form.rule.unit==="seconds"?"Lịch theo giây có thể vượt quota; job vẫn chạy nhưng email sẽ chờ hoặc thất bại khi hàng đợi đầy.":"Mỗi lần chạy terminal tạo tối đa một email."}</p><label>Người nhận<input type="email" required value={form.emailNotification.to} onChange={event=>setForm({...form,emailNotification:{enabled:true,to:event.target.value,subject:form.emailNotification?.enabled?form.emailNotification.subject:""}})}/></label><label>Tiêu đề<input required maxLength={200} value={form.emailNotification.subject} onChange={event=>setForm({...form,emailNotification:{enabled:true,to:form.emailNotification?.enabled?form.emailNotification.to:"",subject:event.target.value}})}/></label></>}
               <label className="scheduleWide">Thư mục log<div className="scheduleDirectory"><input required value={form.logDirectory} onChange={(event) => { setDirectoryMessage(""); setForm({ ...form, logDirectory: event.target.value }); }} /><button type="button" onClick={() => void validateDirectory()}>Kiểm tra</button></div></label>
               {directoryMessage && <p className="scheduleDirectoryOk scheduleWide">✓ {directoryMessage}</p>}
               {feedback && <p className={`scheduleFeedback ${feedback.kind} scheduleWide`} role="alert">{feedback.message}</p>}

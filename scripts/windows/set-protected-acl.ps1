@@ -40,11 +40,19 @@ $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAcce
 if ($includeSystem) {
   $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($systemSid, $fullControl, $inheritance, $propagation, $allow)))
 }
-Set-Acl -LiteralPath $item.FullName -AclObject $security -ErrorAction Stop
-
-$actual = Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
+# Persist only the sections modified above (DACL and owner). Windows PowerShell's
+# Set-Acl provider can request audit/SACL access, requiring SeSecurityPrivilege
+# even though this helper never changes audit rules. Do not elevate or relax ACLs.
+$sections = [System.Security.AccessControl.AccessControlSections]::Access -bor [System.Security.AccessControl.AccessControlSections]::Owner
+if ($isDirectory) {
+  [System.IO.Directory]::SetAccessControl($item.FullName, $security)
+  $actual = [System.IO.Directory]::GetAccessControl($item.FullName, $sections)
+} else {
+  [System.IO.File]::SetAccessControl($item.FullName, $security)
+  $actual = [System.IO.File]::GetAccessControl($item.FullName, $sections)
+}
 if (-not $actual.AreAccessRulesProtected) { throw 'ACL inheritance remains enabled' }
-$ownerSid = ([System.Security.Principal.NTAccount]$actual.Owner).Translate([System.Security.Principal.SecurityIdentifier])
+$ownerSid = $actual.GetOwner([System.Security.Principal.SecurityIdentifier])
 if ($ownerSid.Value -ne $currentSid.Value) { throw "Unexpected ACL owner: $($ownerSid.Value)" }
 
 $allowed = @($currentSid.Value)

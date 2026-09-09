@@ -11,6 +11,9 @@ import {
   SessionRepository,
 } from "@/lib/server/persistence/session-repository";
 import { getRuntimeSettings } from "@/lib/server/runtime-settings";
+import {getEmailSettings} from "@/lib/server/email/email-settings";
+import {safeError} from "@/lib/server/logging/redaction";
+import {buildJobEmailReport} from "@/lib/server/email/job-email-report";
 import { nextFutureOccurrence, nextOccurrence } from "./schedule-calculator";
 import { scheduleLogWriter, ScheduleLogWriter } from "./schedule-log-writer";
 import {
@@ -115,9 +118,17 @@ export class ScheduleService {
     scheduledFor: string,
     counted: boolean,
   ) {
+    let emailSnapshot: ScheduleOccurrence["emailConfigSnapshot"] = null;
+    if(schedule.emailNotification?.enabled){
+      const settings=await getEmailSettings();
+      if(!settings)throw new Error("Cấu hình email không còn tồn tại");
+      emailSnapshot={version:1,enabled:true,to:schedule.emailNotification.to,subject:schedule.emailNotification.subject,accountIdentity:settings.accountIdentity};
+    }
     const occurrence = this.repository.createOccurrence(
       schedule.id,
       scheduledFor,
+      "pending",
+      emailSnapshot,
     );
     if (!occurrence || occurrence.status !== "pending") return occurrence;
     return this.tryLaunch(schedule, occurrence, counted);
@@ -299,7 +310,7 @@ export class ScheduleService {
     const occurrence = this.repository.findByRun(event.runId);
     if (
       !occurrence ||
-      ["completed", "failed", "cancelled"].includes(occurrence.status)
+      (["completed", "failed", "cancelled"].includes(occurrence.status)&&(!occurrence.emailConfigSnapshot?.enabled||this.repository.hasEmailOutbox(occurrence.id)))
     ) {
       return;
     }
@@ -312,14 +323,21 @@ export class ScheduleService {
         : run.status === "cancelled"
           ? "cancelled"
           : "failed";
-    const updated = this.repository.updateOccurrence(occurrence.id, {
+    const patch = {
       status,
       result: run.result,
       errorCode: run.errorCode,
       errorMessage: run.status === "failed" ? run.result : null,
       endedAt: run.endedAt || this.now().toISOString(),
-    })!;
+    } as const;
     const schedule = this.repository.get(occurrence.scheduleId);
+    let outbox = null;
+    if(schedule&&occurrence.emailConfigSnapshot?.enabled){
+      const preview={...occurrence,...patch};
+      try{const report=buildJobEmailReport(schedule,preview,run);
+      outbox={configSnapshot:{...occurrence.emailConfigSnapshot},resultSnapshot:{...report.resultSnapshot,body:report.body},attachmentContent:report.attachmentContent,attachmentName:report.attachmentName,attachmentSha256:report.attachmentSha256,messageId:"<schedule-"+occurrence.id+"@android-agent.local>"};}catch(error){outbox={configSnapshot:{...occurrence.emailConfigSnapshot},resultSnapshot:{version:1,scheduleId:schedule.id,occurrenceId:occurrence.id,runId:run.id,status,result:run.result,errorCode:run.errorCode,sourceSteps:run.steps.length},attachmentContent:null,attachmentName:null,attachmentSha256:null,messageId:"<schedule-"+occurrence.id+"@android-agent.local>",initialStatus:"attachment_failed" as const,errorCode:"EMAIL_REPORT_FAILED",errorMessage:safeError(error)}}
+    }
+    const updated = this.repository.finishOccurrenceWithEmail(occurrence.id,patch,outbox)!;
     if (schedule) await this.write(schedule, updated);
     eventBus.emit("schedule.updated", {
       scheduleId: occurrence.scheduleId,
@@ -357,6 +375,7 @@ export class ScheduleService {
   }
 
   async reconcile() {
+    for(const occurrence of this.repository.terminalMissingEmailOutbox()){const run=occurrence.runId?this.sessions.findRun(occurrence.runId):null;if(run&&["completed","failed","cancelled"].includes(run.status))await this.onEvent({eventId:crypto.randomUUID(),type:"run."+run.status,runId:run.id,data:{reconciled:true},createdAt:this.now().toISOString()});}
     for (const occurrence of this.repository.running()) {
       const run = occurrence.runId
         ? this.sessions.findRun(occurrence.runId)

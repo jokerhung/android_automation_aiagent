@@ -25,24 +25,27 @@
     "verify:keyboard-isolation": "node scripts/verify-chat-keyboard-isolation.cjs",
     "verify:schedule-ui": "node scripts/verify-schedule-ui.cjs && node scripts/verify-schedule-keyboard.cjs && node scripts/verify-schedule-types-ui.cjs && node scripts/verify-schedule-types-api.cjs && node scripts/verify-schedule-sse.cjs && node scripts/verify-schedule-crud.cjs",
     "verify:schedule": "npm run typecheck && npm test -- --run tests/schedule-types.test.ts tests/schedule.test.ts tests/schedule-service.test.ts",
-    "verify:schedule-migration": "tsx scripts/verify-schedule-migration-copy.ts"
+    "verify:schedule-migration": "tsx scripts/verify-schedule-migration-copy.ts",
+    "verify:email": "tsx scripts/verify-email-secret.ts && npm run typecheck && vitest run tests/email-contracts.test.ts tests/job-email-report.test.ts tests/email-outbox.test.ts tests/email-terminal-transaction.test.ts tests/email-worker.test.ts tests/email-api-source.test.ts tests/email-ui-source.test.ts tests/schedule-service.test.ts"
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.8.11",
     "better-sqlite3": "^13.0.3",
+    "dotenv": "^17.2.3",
     "next": "^15.5.7",
+    "nodemailer": "^10.0.1",
     "openai": "^6.8.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "server-only": "^0.0.1",
     "sharp": "^0.35.4",
     "ws": "^8.18.3",
-    "zod": "^3.25.76",
-    "dotenv": "^17.2.3"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.10.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.1.16",
     "@types/react-dom": "^19.1.9",
     "@types/ws": "^8.18.1",

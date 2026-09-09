@@ -5,7 +5,7 @@ export const BACKGROUND_LOG_MAX_BYTES = 5 * 1024 * 1024;
 export const BACKGROUND_LOG_MAX_FILES = 7;
 export const BACKGROUND_LOG_MAX_LINE_BYTES = 16 * 1024;
 
-function scrubLogMessage(message: string) {
+export function scrubLogMessage(message: string) {
   return redact(message)
     .replace(/(\bAuthorization\s*[:=]\s*Bearer\s+)[^\s,;]+/gi, "$1[REDACTED]")
     .replace(/(\bBearer\s+)[^\s,;]+/gi, "$1[REDACTED]")

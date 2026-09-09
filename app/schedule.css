@@ -90,4 +90,5 @@
  .scheduleEditorBody .scheduleWide{grid-column:1}
  .scheduleEditor>header,.scheduleEditor>footer{padding-inline:18px}
 }
+.scheduleEmailStatus{margin:3px 0;color:#e8a15d;font-size:11px}.scheduleEmailEstimate{margin:0;padding:10px 12px;border-left:3px solid #d99042;background:#2b241e;color:#e4c49d;font-size:12px;line-height:1.45}.scheduleEmailOpt{padding:12px;border:1px solid #4d4034;border-radius:9px;background:#2b241e}.scheduleEmailOpt>span{display:flex;align-items:center;gap:8px}.scheduleEmailOpt input{width:auto}.scheduleEmailOpt small{color:#d6b48d}
 @media(prefers-reduced-motion:reduce){.scheduleDotSpinner{animation-duration:1.8s}.scheduleList .scheduleRowActions{transition:none}}

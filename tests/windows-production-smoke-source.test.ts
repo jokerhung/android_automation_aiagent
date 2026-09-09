@@ -39,6 +39,6 @@ describe("production smoke source invariants", () => {
   });
 
   it("does not launch browsers or modify Startup", () => {
-    expect(source).not.toMatch(/startup|start-process|cmd.exe|explorer.exe|open-home/i);
+    expect(source).not.toMatch(/start-process|cmd.exe|explorer.exe|open-home|StartupApproved|SpecialFolder]::Startup/i);
   });
 });

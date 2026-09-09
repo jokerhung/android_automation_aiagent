@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Conversation, DeviceSummary, RunRecord } from "@/lib/contracts/types";
 import { containedMediaViewport, pointerToNormalized } from "@/lib/shared/coordinates";
 import SchedulePanel from "@/components/schedule-panel";
-import SettingsDialog, { type Settings } from "@/components/settings-dialog";
+import SettingsDialog, { type Settings,type EmailDraft } from "@/components/settings-dialog";
 import {AndroidStreamPlayer,type ClientStreamSession} from "@/components/android-stream-player";
 
+type EmailData=import("@/lib/contracts/email").EmailPublicSettings;
 type AutostartData = import("@/lib/contracts/system").AutostartStatus & { csrfToken?: string };
 const unavailableAutostart: AutostartData = { supported: false, enabled: null, registration: "unknown", backgroundReady: false, reason: "Không thể đọc trạng thái khởi động cùng Windows." };
 type Api<T> = { ok: boolean; data: T; error?: { message: string } };
@@ -32,6 +33,8 @@ export default function AppShell() {
   const [showSettings,setShowSettings]=useState(false);
   const [showSchedules,setShowSchedules]=useState(false);
   const [settings,setSettings]=useState<Settings>({});
+  const [email,setEmail]=useState<EmailData|null>(null);
+  const [emailCsrf,setEmailCsrf]=useState("");
   const [autostart,setAutostart]=useState<AutostartData>(unavailableAutostart);
   const [streamSession,setStreamSession]=useState<ClientStreamSession|null>(null);
   const [streamGeneration,setStreamGeneration]=useState(0);
@@ -169,20 +172,22 @@ export default function AppShell() {
 
   async function openSettings() {
     try {
-      const [value, system] = await Promise.all([
+      const [value, system,mail] = await Promise.all([
         get<Settings>("/api/settings"),
         get<AutostartData>("/api/system/autostart").catch(cause => ({...unavailableAutostart, reason: cause instanceof Error ? cause.message : unavailableAutostart.reason})),
+        get<{settings:EmailData|null;csrfToken:string}>("/api/settings/email").catch(()=>({settings:null,csrfToken:""})),
       ]);
-      setSettings({...value,apiKey:""}); setAutostart(system); setShowSettings(true);
+      setSettings({...value,apiKey:""});setAutostart(system);setEmail(mail.settings);setEmailCsrf(mail.csrfToken);setShowSettings(true);
     } catch(cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
-  async function saveSettings(draft: Settings, enabled?: boolean) {
+  async function saveSettings(draft: Settings, enabled?: boolean,mail?:EmailDraft) {
     const {apiKeyConfigured:_,apiKey,...values}=draft;
     const body=apiKey?.trim()?{...values,apiKey:apiKey.trim()}:values;
     const response=await fetch("/api/settings",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
     const payload=await response.json() as Api<Settings>;
     if(!response.ok||!payload.ok) throw new Error(payload.error?.message||"Không thể lưu cấu hình");
     setSettings({...payload.data,apiKey:""});
+    if(mail){const saved=await fetch("/api/settings/email",{method:"PATCH",headers:{"content-type":"application/json","x-autostart-token":emailCsrf},body:JSON.stringify(mail)});const result=await saved.json() as Api<EmailData>;if(!saved.ok||!result.ok)throw new Error("Đã lưu cấu hình ứng dụng, nhưng chưa lưu được email. "+(result.error?.message||"Vui lòng thử lại."));setEmail(result.data);}
     if(payload.data.maxSteps)setMaxSteps(payload.data.maxSteps);
     if(payload.data.screenRefreshMs)setScreenRefreshMs(payload.data.screenRefreshMs);
     if(enabled !== undefined && (enabled !== autostart.enabled || autostart.registration !== "valid" && enabled)) {
@@ -311,6 +316,6 @@ export default function AppShell() {
       <div className="phoneWrap">{selected ? <div className="phone"><AndroidStreamPlayer session={streamSession} refresh={refresh} onPointerDown={(event)=>drag.current=point(event)} onPointerUp={(event)=>{const end=point(event),start=drag.current;drag.current=null;if(!start)return;const distance=Math.hypot(end.x-start.x,end.y-start.y);void action(distance>30?{type:"swipe",...start,x2:end.x,y2:end.y,durationMs:300}:{type:"tap",x:end.x,y:end.y})}}/></div> : <div className="noPhone"><span>▯</span><b>Chưa có thiết bị</b><p>Bật USB debugging và xác nhận quyền ADB trên điện thoại.</p></div>}</div>
       <div className="deviceInfo">{currentDevice ? <><span>{currentDevice.width} × {currentDevice.height}</span><button onClick={()=>setStreamGeneration(value=>value+1)}>Kết nối lại</button><button onClick={()=>setRefresh(value=>value+1)}>Chụp mới</button><span>{streamSession?.mode==="scrcpy"?"Video scrcpy":"Ảnh chụp ADB"}</span></> : <span>Chờ kết nối...</span>}</div>
     </aside>
-    {showSettings&&<SettingsDialog initial={settings} autostart={autostart} onSave={saveSettings} onClose={()=>setShowSettings(false)}/>}
+    {showSettings&&<SettingsDialog initial={settings} autostart={autostart} email={email} onSave={saveSettings} onClose={()=>setShowSettings(false)}/>}
   </main>;
 }

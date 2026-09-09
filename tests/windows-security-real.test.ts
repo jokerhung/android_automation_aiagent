@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { protectWindowsPath, resetWindowsSecurityCacheForTests } from "@/lib/server/platform/windows/windows-security";
 
-const powershell = path.join(process.env.SystemRoot || "C:\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+const powershell = path.join(process.env.SystemRoot || String.raw`C:\Windows`, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 function ps(script: string, target: string): string {
   return execFileSync(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", windowsHide: true, timeout: 10_000, env: { ...process.env, ACL_TEST_TARGET: target } }).trim();
 }
@@ -16,8 +16,8 @@ describe.runIf(process.platform === "win32")("exact real Windows ACL", () => {
     const target = path.join(root, "private đ folder");
     fs.mkdirSync(target);
     const before = ps("(Get-Acl -LiteralPath $env:ACL_TEST_TARGET).Sddl", root);
-    ps("$acl=Get-Acl -LiteralPath $env:ACL_TEST_TARGET;$sid=New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0');$rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,'Read','ContainerInherit,ObjectInherit','None','Allow');$acl.AddAccessRule($rule);Set-Acl -LiteralPath $env:ACL_TEST_TARGET -AclObject $acl", target);
     try {
+      ps("$acl=[IO.Directory]::GetAccessControl($env:ACL_TEST_TARGET);$sid=New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0');$rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,'Read','ContainerInherit,ObjectInherit','None','Allow');$acl.AddAccessRule($rule);[IO.Directory]::SetAccessControl($env:ACL_TEST_TARGET,$acl)", target);
       resetWindowsSecurityCacheForTests();
       protectWindowsPath(target, { container: true, allowSystem: true });
       const value = JSON.parse(ps("$acl=Get-Acl -LiteralPath $env:ACL_TEST_TARGET;[pscustomobject]@{protected=$acl.AreAccessRulesProtected;rules=@($acl.Access|%{$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value})}|ConvertTo-Json -Compress", target)) as { protected: boolean; rules: string[] };
@@ -44,5 +44,36 @@ describe.runIf(process.platform === "win32")("exact real Windows ACL", () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it.each([
+    { container: true, allowSystem: false },
+    { container: true, allowSystem: true },
+    { container: false, allowSystem: false },
+    { container: false, allowSystem: true },
+  ])("protects and verifies twice without cached ACLs: %j", options => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "acl-regression-"));
+    const target = path.join(root, "owned target");
+    if (options.container) fs.mkdirSync(target);
+    else fs.writeFileSync(target, "test");
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        resetWindowsSecurityCacheForTests();
+        protectWindowsPath(target, options);
+      }
+      const value = JSON.parse(ps("$acl=Get-Acl -LiteralPath $env:ACL_TEST_TARGET;[pscustomobject]@{protected=$acl.AreAccessRulesProtected;owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value;user=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value;count=@($acl.Access).Count}|ConvertTo-Json -Compress", target));
+      expect(value.protected).toBe(true);
+      expect(value.owner).toBe(value.user);
+      expect(value.count).toBe(options.allowSystem ? 2 : 1);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("does not persist or read audit sections", () => {
+    const helper = fs.readFileSync(path.join(process.cwd(), "scripts/windows/set-protected-acl.ps1"), "utf8");
+    expect(helper).not.toMatch(/^\s*Set-Acl\s/m);
+    expect(helper).not.toContain("AccessControlSections]::Audit");
+    expect(helper).toContain("[System.IO.Directory]::SetAccessControl");
+    expect(helper).toContain("[System.IO.File]::SetAccessControl");
+    expect(helper).toContain('if ($rules.Count -ne $allowed.Count)');
   });
 });

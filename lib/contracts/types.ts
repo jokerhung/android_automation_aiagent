@@ -1,3 +1,4 @@
+import type {ScheduleEmailNotification} from "./email";
 export type DeviceState = "device" | "unauthorized" | "offline";
 export type DeviceSummary = { serial:string; state:DeviceState; model:string|null; product:string|null; device:string|null; transportId:string|null; displayName:string; width:number|null; height:number|null };
 export type ManualAction =
@@ -16,6 +17,6 @@ export type AppEvent = { eventId:string; type:string; conversationId?:string; ru
 export type ScheduleStatus="active"|"paused"|"completed"|"disabled";
 export type ScheduleRule={type:"interval";every:number;unit:"seconds"|"minutes"|"hours"}|{type:"daily"}|{type:"weekly";weekdays:(1|2|3|4|5|6|7)[]};
 export type OccurrenceStatus="pending"|"waiting_device"|"running"|"completed"|"failed"|"missed"|"cancelled";
-export type Schedule={latestOccurrence?:ScheduleOccurrence|null;id:string;name:string;startDate:string;localTime:string;timezone:string;rule:ScheduleRule;occurrenceLimit:number|null;prompt:string;deviceSerial:string;logDirectory:string;status:ScheduleStatus;nextRunAt:string|null;completedOccurrences:number;createdAt:string;updatedAt:string};
-export type ScheduleOccurrence={id:string;scheduleId:string;scheduledFor:string;status:OccurrenceStatus;conversationId:string|null;runId:string|null;startedAt:string|null;endedAt:string|null;result:string|null;errorCode:string|null;errorMessage:string|null;logFile:string|null;createdAt:string;updatedAt:string};
+export type Schedule={latestOccurrence?:ScheduleOccurrence|null;id:string;name:string;startDate:string;localTime:string;timezone:string;rule:ScheduleRule;occurrenceLimit:number|null;prompt:string;deviceSerial:string;logDirectory:string;emailNotification?:ScheduleEmailNotification;status:ScheduleStatus;nextRunAt:string|null;completedOccurrences:number;createdAt:string;updatedAt:string};
+export type ScheduleOccurrence={id:string;scheduleId:string;scheduledFor:string;status:OccurrenceStatus;conversationId:string|null;runId:string|null;startedAt:string|null;endedAt:string|null;result:string|null;errorCode:string|null;errorMessage:string|null;logFile:string|null;emailConfigSnapshot?:{version:1;enabled:true;to:string;subject:string;accountIdentity:string}|null;emailStatus?:string|null;emailDelivery?:{recipient:string;subject:string;attempts:number;nextAttemptAt:string|null;sentAt:string|null;errorCode:string|null;errorMessage:string|null}|null;createdAt:string;updatedAt:string};
 export type ScheduleDetail=Schedule&{occurrences:ScheduleOccurrence[]};

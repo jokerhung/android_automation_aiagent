@@ -45,6 +45,46 @@ Biến `ANDROID_AGENT_DATABASE_PATH` cho phép chỉ định database riêng; lo
 
 ## Kiểm thử không gây side effect
 
+### Log chẩn đoán launcher từ lúc đăng nhập
+
+Launcher ghi log riêng trước khi khởi chạy Node:
+
+```text
+%LOCALAPPDATA%\AndroidAgent\launcher\<hash-app-root>\launcher.log
+```
+
+Hash này dựa trên app root, khác installationId dựa trên database của background.log.
+Log gồm UTC timestamp, PID launcher, launch_begin, preflight, node_spawned,
+stdout/stderr, node_alive và node_exit (mã thoát, thời gian chạy).
+Node còn ghi startup_phase: acquire-lock / import-application / start-application /
+ready / failed. Lỗi ghi background.log được đưa ra stderr để launcher thu lại.
+Nếu lỗi trước main/import Node, stderr vẫn được launcher thu.
+
+- PowerShell launcher tiếp tục chạy ẩn cùng Node để thu hai pipe và mã thoát;
+  không tự restart/kill Node và không thay đăng ký Startup.
+- node_alive chỉ có nghĩa PID còn sống, không phải HTTP/tray đã sẵn sàng.
+- Giới hạn ba file launcher.log, .1, .2; mỗi file khoảng 5 MiB; mỗi dòng tối đa
+  8.192 ký tự nội dung. Cắt dòng quá dài, che API key/Bearer/password/token và
+  ảnh base64. Không log toàn bộ env hoặc chủ động đọc prompt.
+- Thư mục log giới hạn quyền current user và SYSTEM. Nếu không tạo được log
+  directory, launcher báo lỗi qua stderr; log không thể ghi được khi chính
+  PowerShell bị policy chặn trước khi chạy script.
+- Shutdown/reboot đột ngột có thể không có node_exit.
+
+Đọc các log mới nhất bằng PowerShell:
+
+```powershell
+Get-ChildItem "$env:LOCALAPPDATA\AndroidAgent\launcher" -Filter launcher.log -Recurse |
+  Sort-Object LastWriteTime -Descending |
+  ForEach-Object { $_.FullName; Get-Content -LiteralPath $_.FullName -Tail 80 }
+```
+
+Shortcut Startup đang trỏ tới cùng launch-background.ps1 nên lần đăng nhập tiếp
+theo tự dùng logging mới, không cần đăng ký lại hoặc build giao diện chỉ để nạp
+script launcher. Production build vẫn phải tồn tại cho server thực.
+Test `tests/windows-launcher-logging.test.ts` chạy launcher với host giả trong
+thư mục tạm, kiểm tra lỗi sớm, exit code, hai pipe, redaction và rotation.
+
 ### Chẩn đoán Startup và mở trang chủ (2026-09-09)
 
 - Shortcut hợp lệ nhưng chưa có bản ghi Explorer StartupApproved được coi là đã bật;
