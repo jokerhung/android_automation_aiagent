@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Conversation, DeviceSummary, RunRecord } from "@/lib/contracts/types";
 import { containedMediaViewport, pointerToNormalized } from "@/lib/shared/coordinates";
 import SchedulePanel from "@/components/schedule-panel";
+import SettingsDialog, { type Settings } from "@/components/settings-dialog";
 import {AndroidStreamPlayer,type ClientStreamSession} from "@/components/android-stream-player";
 
 type Api<T> = { ok: boolean; data: T; error?: { message: string } };
-type Settings={model?:string;baseUrl?:string;maxSteps?:number;screenRefreshMs?:number;apiKey?:string;apiKeyConfigured?:boolean};
 
 async function get<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: "no-store" });
@@ -38,6 +38,7 @@ export default function AppShell() {
   const drag = useRef<{ x: number; y: number } | null>(null);
   const timelineRef=useRef<HTMLDivElement>(null);
   const conversationInitialized=useRef(false);
+  const conversationNavigation=useRef(0);
   const run = useMemo(() => conversation?.runs.at(-1) || null, [conversation]);
   const active = Boolean(run && ["queued", "running", "pausing", "paused", "cancelling"].includes(run.status));
   const interactionLocked=active||runSubmitting;
@@ -77,13 +78,53 @@ export default function AppShell() {
 
   useEffect(() => {
     void loadDevices();
-    void loadConversations().then(async list=>{if(!conversationInitialized.current&&list[0]){conversationInitialized.current=true;setConversation(await get<Conversation>("/api/conversations/"+list[0].id))}}).catch(cause=>setError(cause instanceof Error?cause.message:String(cause)));
+    const navigation=conversationNavigation.current;
+    void loadConversations().then(async list=>{if(!conversationInitialized.current&&list[0]){conversationInitialized.current=true;const loaded=await get<Conversation>("/api/conversations/"+list[0].id);if(navigation===conversationNavigation.current)setConversation(loaded)}}).catch(cause=>setError(cause instanceof Error?cause.message:String(cause)));
   }, [loadDevices, loadConversations]);
+
+  useEffect(() => {
+    // Listen at shell level, even when the schedules panel is not mounted.
+    const source = new EventSource("/api/schedules/events");
+    const handledRuns = new Set<string>();
+    let disposed = false;
+    const onScheduleUpdated = async (event: Event) => {
+      let data: { status?: string; conversationId?: string; runId?: string };
+      try { data = JSON.parse((event as MessageEvent).data); } catch { return; }
+      if (!data || data.status !== "running" || !data.conversationId || !data.runId || handledRuns.has(data.runId)) return;
+      const runId = data.runId;
+      handledRuns.add(runId);
+      // Keep deduplication bounded for long-running interval schedules.
+      if (handledRuns.size > 256) handledRuns.delete(handledRuns.values().next().value!);
+      const navigation = ++conversationNavigation.current;
+      conversationInitialized.current = true;
+      try {
+        const jobConversation = await get<Conversation>("/api/conversations/" + encodeURIComponent(data.conversationId));
+        if (disposed || navigation !== conversationNavigation.current) return;
+        const jobRun = jobConversation.runs.find(item => item.id === runId);
+        if (!jobRun) throw new Error("Không tìm thấy lần chạy của công việc.");
+        setLiveStep(null);
+        setError("");
+        setConversation(jobConversation);
+        setSelected(jobRun.deviceSerial);
+        setShowSchedules(false);
+        setShowSettings(false);
+        await loadConversations();
+      } catch (cause) {
+        handledRuns.delete(runId);
+        if (!disposed && navigation === conversationNavigation.current) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+        }
+      }
+    };
+    source.addEventListener("schedule.updated", onScheduleUpdated);
+    return () => { disposed = true; source.close(); };
+  }, [loadConversations]);
 
   useEffect(() => {
     if(!conversation)return;
     const currentRun=conversation.runs.at(-1);
-    const reload=()=>{void get<Conversation>("/api/conversations/"+conversation.id).then(setConversation);void loadConversations();setRefresh(value=>value+1)};
+    let disposed=false;
+    const reload=()=>{void get<Conversation>("/api/conversations/"+conversation.id).then(loaded=>{if(!disposed)setConversation(current=>current?.id===loaded.id?loaded:current)}).catch(cause=>{if(!disposed)setError(cause instanceof Error?cause.message:String(cause))});void loadConversations().catch(()=>{});setRefresh(value=>value+1)};
     if(!currentRun||!["queued","running","pausing","paused","cancelling"].includes(currentRun.status)){setLiveStep(null);return}
     const source=new EventSource("/api/runs/"+currentRun.id+"/events");
     source.addEventListener("run.step.started",event=>{const data=JSON.parse((event as MessageEvent).data) as {step:number;maxSteps:number};setLiveStep({...data,phase:"Đang quan sát và phân tích màn hình…"})});
@@ -92,7 +133,7 @@ export default function AppShell() {
     source.addEventListener("run.step",reload);
     for(const type of ["run.status","run.completed","run.failed","run.cancelled"])source.addEventListener(type,()=>{setLiveStep(null);reload()});
     source.onerror=()=>{if(source.readyState===EventSource.CLOSED)setTimeout(reload,1000)};
-    return()=>source.close();
+    return()=>{disposed=true;source.close()};
   }, [conversation?.id,run?.id,run?.status,loadConversations]);
 
   useEffect(()=>{
@@ -123,19 +164,25 @@ export default function AppShell() {
 
   async function deleteAllHistory(){if(interactionLocked||!conversations.length||!window.confirm("Xóa toàn bộ lịch sử trò chuyện? Hành động này không thể hoàn tác."))return;setError("");const response=await fetch("/api/conversations",{method:"DELETE"});const payload=await response.json() as Api<{deleted:number}>;if(!response.ok||!payload.ok){setError(payload.error?.message||"Không thể xóa lịch sử");return}setConversation(null);setConversations([]);conversationInitialized.current=false;setLiveStep(null)}
 
-  async function openSettings(){const value=await get<Settings>("/api/settings");setSettings({...value,apiKey:""});if(value.maxSteps)setMaxSteps(value.maxSteps);if(value.screenRefreshMs)setScreenRefreshMs(value.screenRefreshMs);setShowSettings(true)}
-  async function saveSettings(){const {apiKeyConfigured:_,apiKey,...values}=settings;const body=apiKey?.trim()?{...values,apiKey:apiKey.trim()}:values;const response=await fetch("/api/settings",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(body)});const payload=await response.json() as Api<Settings>;if(!payload.ok){setError(payload.error?.message||"Không thể lưu cài đặt");return}setSettings({...payload.data,apiKey:""});if(payload.data.maxSteps)setMaxSteps(payload.data.maxSteps);if(payload.data.screenRefreshMs)setScreenRefreshMs(payload.data.screenRefreshMs);setShowSettings(false)}
+  async function openSettings(){try{const value=await get<Settings>("/api/settings");setSettings({...value,apiKey:""});setShowSettings(true)}catch(cause){setError(cause instanceof Error?cause.message:String(cause))}}
+  async function saveSettings(draft:Settings){const {apiKeyConfigured:_,apiKey,...values}=draft;const body=apiKey?.trim()?{...values,apiKey:apiKey.trim()}:values;const response=await fetch("/api/settings",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(body)});const payload=await response.json() as Api<Settings>;if(!response.ok||!payload.ok)throw new Error(payload.error?.message||"Không thể lưu cấu hình");setSettings({...payload.data,apiKey:""});if(payload.data.maxSteps)setMaxSteps(payload.data.maxSteps);if(payload.data.screenRefreshMs)setScreenRefreshMs(payload.data.screenRefreshMs);setShowSettings(false)}
 
   async function createConversation() {
+    const navigation=++conversationNavigation.current;
     const response = await fetch("/api/conversations", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     const payload = (await response.json()) as Api<Conversation>;
+    if(navigation!==conversationNavigation.current)return;
     conversationInitialized.current=true;
     setConversation(payload.data);
     setConversations((items) => [payload.data, ...items]);
   }
 
   async function openConversation(id: string) {
-    setConversation(await get<Conversation>("/api/conversations/" + id));
+    const navigation=++conversationNavigation.current;
+    const loaded=await get<Conversation>("/api/conversations/" + id);
+    if(navigation!==conversationNavigation.current)return;
+    setConversation(loaded);
+    setShowSchedules(false);
   }
 
   async function send() {
@@ -221,6 +268,6 @@ export default function AppShell() {
       <div className="phoneWrap">{selected ? <div className="phone"><AndroidStreamPlayer session={streamSession} refresh={refresh} onPointerDown={(event)=>drag.current=point(event)} onPointerUp={(event)=>{const end=point(event),start=drag.current;drag.current=null;if(!start)return;const distance=Math.hypot(end.x-start.x,end.y-start.y);void action(distance>30?{type:"swipe",...start,x2:end.x,y2:end.y,durationMs:300}:{type:"tap",x:end.x,y:end.y})}}/></div> : <div className="noPhone"><span>▯</span><b>Chưa có thiết bị</b><p>Bật USB debugging và xác nhận quyền ADB trên điện thoại.</p></div>}</div>
       <div className="deviceInfo">{currentDevice ? <><span>{currentDevice.width} × {currentDevice.height}</span><button onClick={()=>setStreamGeneration(value=>value+1)}>Kết nối lại</button><button onClick={()=>setRefresh(value=>value+1)}>Chụp mới</button><span>{streamSession?.mode==="scrcpy"?"Video scrcpy":"Ảnh chụp ADB"}</span></> : <span>Chờ kết nối...</span>}</div>
     </aside>
-    {showSettings&&<div className="modalBackdrop" onClick={()=>setShowSettings(false)}><section className="modal" onClick={event=>event.stopPropagation()}><h2>Cài đặt</h2><label>OpenAI API key<input type="password" autoComplete="new-password" value={settings.apiKey||""} placeholder={settings.apiKeyConfigured?"Nhập key mới để thay đổi":"Nhập API key"} onChange={event=>setSettings({...settings,apiKey:event.target.value})}/></label><label>Model<input value={settings.model||""} placeholder="gpt-4o" onChange={event=>setSettings({...settings,model:event.target.value})}/></label><label>Base URL<input value={settings.baseUrl||""} placeholder="https://api.openai.com/v1" onChange={event=>setSettings({...settings,baseUrl:event.target.value})}/></label><label>Số bước tối đa<input type="number" min="1" max="100" value={settings.maxSteps||100} onChange={event=>setSettings({...settings,maxSteps:Number(event.target.value)})}/></label><label>Làm mới màn hình (ms)<input type="number" min="300" max="10000" value={settings.screenRefreshMs||900} onChange={event=>setSettings({...settings,screenRefreshMs:Number(event.target.value)})}/></label><p>API key: {settings.apiKeyConfigured?"Đã cấu hình · để trống nếu không thay đổi":"Chưa cấu hình"}</p><div><button onClick={()=>setShowSettings(false)}>Hủy</button><button className="run" onClick={saveSettings}>Lưu</button></div></section></div>}
+    {showSettings&&<SettingsDialog initial={settings} onSave={saveSettings} onClose={()=>setShowSettings(false)}/>}
   </main>;
 }

@@ -1,6 +1,19 @@
 import {afterEach,describe,expect,it,vi} from "vitest";import fs from "node:fs";import os from "node:os";import path from "node:path";import {SessionRepository} from "@/lib/server/persistence/session-repository";import {ScheduleRepository} from "@/lib/server/schedule/schedule-repository";import {ScheduleService} from "@/lib/server/schedule/schedule-service";
 const dirs:string[]=[];afterEach(()=>dirs.splice(0).forEach(d=>fs.rmSync(d,{recursive:true,force:true})));const setup=()=>{const sessions=new SessionRepository(":memory:"),repo=new ScheduleRepository(sessions.getDatabase()),dir=fs.mkdtempSync(path.join(os.tmpdir(),"scheduler-int-"));dirs.push(dir);return{sessions,repo,item:repo.create({name:"Due",startDate:"2026-09-08",localTime:"08:00",timezone:"Asia/Bangkok",rule:{type:"daily"},occurrenceLimit:null,prompt:"Do it",deviceSerial:"SERIAL",logDirectory:dir,nextRunAt:"2026-09-08T01:00:00.000Z"})}};
+import {eventBus} from "@/lib/server/event-bus";
 describe("ScheduleService",()=>{
+ it.each(["scheduled","run-now"] as const)("includes chat navigation data when %s starts",async(mode)=>{
+  const {sessions,repo,item}=setup();
+  const events:unknown[]=[];
+  const unsubscribe=eventBus.subscribe(event=>{if(event.type==="schedule.updated")events.push(event.data)});
+  try{
+   const runs={createAndStart:vi.fn(async({conversationId,deviceSerial,goal,maxSteps})=>sessions.createRun(conversationId,deviceSerial,goal,maxSteps))};
+   const service=new ScheduleService(repo,{write:vi.fn()} as never,()=>new Date("2026-09-08T01:01:00Z"),runs as never,sessions);
+   if(mode==="scheduled"){await service.tick();await service.tick()}else await service.runNow(item);
+   const occurrence=repo.get(item.id)!.occurrences[0];
+   expect(events).toEqual([{scheduleId:item.id,occurrenceId:occurrence.id,status:"running",conversationId:occurrence.conversationId,runId:occurrence.runId,deviceSerial:"SERIAL"}]);
+  }finally{unsubscribe();sessions.close()}
+ });
  it("is idempotent across ticks",async()=>{const now=new Date("2026-09-08T01:01:00Z"),{sessions,repo,item}=setup(),runs={createAndStart:vi.fn(async({conversationId,deviceSerial,goal,maxSteps})=>sessions.createRun(conversationId,deviceSerial,goal,maxSteps))},service=new ScheduleService(repo,{write:vi.fn(async()=>"log") } as never,()=>now,runs as never,sessions);await service.tick();await service.tick();expect(runs.createAndStart).toHaveBeenCalledOnce();expect(repo.get(item.id)?.completedOccurrences).toBe(1);sessions.close()});
  it("marks late schedule missed",async()=>{const now=new Date("2026-09-08T02:00:00Z"),{sessions,repo,item}=setup(),writer={write:vi.fn(async()=>"missed")},service=new ScheduleService(repo,writer as never,()=>now,{createAndStart:vi.fn()} as never,sessions);await service.tick();expect(repo.get(item.id)?.occurrences[0].status).toBe("missed");sessions.close()});
  it("waits when device busy",async()=>{const now=new Date("2026-09-08T01:01:00Z"),{sessions,repo,item}=setup(),service=new ScheduleService(repo,{write:vi.fn()} as never,()=>now,{createAndStart:vi.fn(async()=>{throw new Error("agent already active")})} as never,sessions);await service.tick();expect(repo.get(item.id)?.occurrences[0].status).toBe("waiting_device");sessions.close()});
